@@ -46,3 +46,28 @@ uv run python scripts/validate_intake.py intake/kimi-k3/444
 
 The validator checks the schema, unique ids, the coverage vocabulary, and that each
 `method` path exists. It exits non-zero on any violation.
+
+## Running against a developer's endpoint
+
+Validate and audit first, then run the selected rows against the endpoint:
+
+```bash
+uv run python scripts/validate_intake.py intake/kimi-k3/444
+uv run python scripts/audit_intake.py intake/kimi-k3/444
+
+scripts/kvh --base-url https://<endpoint>/v1 --served-model <model> -- \
+  develop --model kimi-k3 --select 6 --select 5 --select 4 --select 18
+```
+
+`--select` takes the row ids from `items.yaml`. Every intake row id has a matching
+manifest selector, which was checked, but the full path has not been run end to end
+against a live endpoint yet. A row marked `wired` has a declared suite; it has not
+necessarily run on this host.
+
+## Known limitation: fake-endpoint runs of row 6
+
+`develop --select 6` against the in-repo fake (`tests/support/fake_k3_server.py`) ends
+`inconclusive` with `rerun_exhausted_invalid`. The cause is not established. Ruled out by direct
+test: the fake's listen backlog and concurrency (148/148 OK at 74 workers, streaming and non-streaming),
+and request body size (largest case about 1.9 KB). The fake is a harness check only; this result says
+nothing about any real endpoint.
