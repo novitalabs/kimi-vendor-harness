@@ -41,7 +41,7 @@ rather than by path.
 ## Validation
 
 ```bash
-uv run python scripts/validate_intake.py intake/k3/444
+uv run python scripts/validate_intake.py intake/kimi-k3/444
 ```
 
 The validator checks the schema, unique ids, the coverage vocabulary, and that each
