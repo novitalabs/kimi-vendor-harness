@@ -102,3 +102,21 @@ reference), [docs/k3-test-catalog.md](docs/k3-test-catalog.md),
 ```bash
 uv run pytest -q tests     # unit + e2e (no endpoint traffic)
 ```
+
+## Tool-call contract suite (standalone)
+
+`suites/novita-api/tests/toolcall_contract/` checks engine-level tool-call behaviour that the
+official KVV suites do not cover (invalid-schema handling, prompt-token stability, literal
+marker text, empty turns, undeclared tools, response_format with tools). It is not part of
+the official row matrix; run it directly against an endpoint:
+
+```bash
+cd vendor/kvv-k3 && PYTHONPATH=../../suites/novita-api:. KVV_ROOT=. TC_SAMPLES=8 \
+  TC_OBSERVATIONS_DIR=/tmp/tc .venv/bin/python -m pytest \
+  ../../suites/novita-api/tests/toolcall_contract \
+  --base-url $URL --smoke-model $M --think-mode opensource -q
+```
+
+Gate tests fail on any violation; observation tests write `toolcall-contract-observations.jsonl`
+and never fail. The harness's own tests (`tests/unit/test_toolcall_contract_suite.py`) run the
+suite against `tests/support/fake_k3_server.py` with one injected fault per known defect.
