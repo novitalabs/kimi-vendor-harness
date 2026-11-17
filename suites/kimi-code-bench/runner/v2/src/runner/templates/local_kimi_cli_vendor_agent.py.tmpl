@@ -1,0 +1,155 @@
+"""Harbor Kimi CLI agent for official-observed vendor trials."""
+from __future__ import annotations
+import json, os, shlex, tempfile
+from pathlib import Path
+from harbor.agents.installed.kimi_cli import KimiCli, _PROVIDER_CONFIG, NonZeroAgentExitCodeError
+from harbor.agents.installed.base import with_prompt_template
+from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
+
+_EXTRA_ENV = [
+    "KIMI_VENDOR_BASE_URL", "KIMI_VENDOR_EXECUTION_PROFILE",
+    "KIMI_VENDOR_API_KEY_FILE",
+    "KBENCH_RECORDING_JOB_ID", "KBENCH_RECORDING_ATTEMPT_ID",
+    "KBENCH_RECORDING_CONTAINER_ID", "KBENCH_RECORDING_TASK_ID",
+    "KBENCH_RECORDING_TASK_LABEL", "KBENCH_RECORDING_ROUTE_PATH",
+    "KBENCH_RECORDING_PHASE", "KBENCH_RECORDING_ROUND", "KBENCH_RECORDING_ATTEMPT",
+    "KIMI_MODEL_CAPABILITIES", "KIMI_MODEL_THINKING_KEEP",
+    "KIMI_VENDOR_CONTAINER_PROXY", "KIMI_VENDOR_EXTRA_HEADERS_JSON",
+    "KIMI_MAX_RETRIES_PER_STEP", "KIMI_MAX_STEPS_PER_RUN",
+]
+for _name in _EXTRA_ENV:
+    if _name not in _PROVIDER_CONFIG["kimi"]["env_keys"]:
+        _PROVIDER_CONFIG["kimi"]["env_keys"].append(_name)
+
+class LocalKimiCliVendor(KimiCli):
+    @staticmethod
+    def name() -> str:
+        return "kimi-cli-vendor"
+
+    def _build_config_json(self, provider: str, model: str) -> str:
+        cfg = json.loads(super()._build_config_json(provider, model))
+        target = os.environ.get("KIMI_VENDOR_BASE_URL", "")
+        route = os.environ.get("KBENCH_RECORDING_ROUTE_PATH", "")
+        if os.environ.get("KIMI_VENDOR_EXECUTION_PROFILE") == "official_observed":
+            if not target or not route:
+                raise ValueError("official_observed requires target and route")
+            cfg["providers"]["harbor"]["base_url"] = "http://127.0.0.1:18080" + route
+        elif target:
+            cfg["providers"]["harbor"]["base_url"] = target
+        cfg["providers"]["harbor"]["api_key"] = "kbench-file-placeholder"
+        extra = os.environ.get("KIMI_VENDOR_EXTRA_HEADERS_JSON", "")
+        if extra:
+            cfg["providers"]["harbor"]["custom_headers"] = json.loads(extra)
+        if os.environ.get("KIMI_MODEL_CAPABILITIES"):
+            cfg["default_thinking"] = True
+        cfg["loop_control"] = {
+            "max_retries_per_step": int(os.environ["KIMI_MAX_RETRIES_PER_STEP"]),
+            "max_steps_per_run": int(os.environ["KIMI_MAX_STEPS_PER_RUN"]),
+        }
+        return json.dumps(cfg)
+
+    async def install(self, environment: BaseEnvironment) -> None:
+        wheel_path = os.environ.get("KIMI_CLI_WHEEL_PATH")
+        if not wheel_path or not Path(wheel_path).is_file():
+            raise ValueError("KIMI_CLI_WHEEL_PATH is required")
+        wheel_target = "/tmp/" + Path(wheel_path).name
+        await environment.upload_file(Path(wheel_path), wheel_target)
+        proxy_path = Path(__file__).with_name("recording_proxy.py")
+        if not proxy_path.is_file():
+            raise ValueError("recording_proxy.py is missing from the agent bundle")
+        await environment.upload_file(proxy_path, "/tmp/kbench-recording-proxy.py")
+        proxy = os.environ.get("KIMI_VENDOR_CONTAINER_PROXY", "http://172.17.0.1:1081")
+        proxy_exports = (
+            f"export http_proxy={shlex.quote(proxy)} https_proxy={shlex.quote(proxy)} "
+            f"HTTP_PROXY={shlex.quote(proxy)} HTTPS_PROXY={shlex.quote(proxy)} "
+            "no_proxy=localhost,127.0.0.1,172.17.0.0/16 "
+            "NO_PROXY=localhost,127.0.0.1,172.17.0.0/16;"
+        )
+        retry = (
+            "retry() { local max=$1; shift; local n=1 d=2; "
+            "until \"$@\"; do [ $n -ge $max ] && return 1; sleep $d; "
+            "n=$((n+1)); d=$((d*2)); done; };"
+        )
+        await self.exec_as_root(environment, command=(
+            f"{retry}{proxy_exports} "
+            "if command -v apt-get >/dev/null 2>&1; then "
+            "retry 4 apt-get update -o Acquire::Retries=3 >/dev/null 2>&1 && "
+            "retry 4 apt-get install -y --no-install-recommends curl ca-certificates >/dev/null 2>&1; "
+            "fi"
+        ), env={"DEBIAN_FRONTEND": "noninteractive"})
+        await self.exec_as_agent(environment, command=(
+            f"set -euo pipefail; {retry}{proxy_exports} "
+            "retry 4 bash -c 'curl -LsSf https://astral.sh/uv/install.sh | bash'; "
+            "export PATH=\"$HOME/.local/bin:$PATH\"; "
+            f"retry 4 uv tool install --python 3.13 {shlex.quote(wheel_target)}; kimi --version"
+        ))
+        api_key_path = os.environ.get("KIMI_VENDOR_API_KEY_FILE", "")
+        api_key = Path(api_key_path).read_text(encoding="utf-8").strip() if api_key_path else ""
+        if api_key:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as handle:
+                handle.write(api_key)
+                secret_path = Path(handle.name)
+            try:
+                secret_path.chmod(0o600)
+                await environment.upload_file(secret_path, "/tmp/kbench-api-key")
+            finally:
+                secret_path.unlink(missing_ok=True)
+            await self.exec_as_agent(environment, command="chmod 600 /tmp/kbench-api-key")
+
+    @with_prompt_template
+    async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
+        config = self._build_config_json(*self.model_name.split("/", 1))
+        config_q = shlex.quote(config)
+        instruction_q = shlex.quote(instruction)
+        env_keys = _PROVIDER_CONFIG["kimi"]["env_keys"]
+        env = {key: os.environ[key] for key in env_keys if os.environ.get(key)}
+        identity_args = " ".join(
+            f"{flag} {shlex.quote(os.environ[env_name])}"
+            for flag, env_name in (
+                ("--job-id", "KBENCH_RECORDING_JOB_ID"),
+                ("--attempt-id", "KBENCH_RECORDING_ATTEMPT_ID"),
+                ("--container-id", "KBENCH_RECORDING_CONTAINER_ID"),
+                ("--task-id", "KBENCH_RECORDING_TASK_ID"),
+                ("--task-label", "KBENCH_RECORDING_TASK_LABEL"),
+                ("--route-path", "KBENCH_RECORDING_ROUTE_PATH"),
+                ("--phase", "KBENCH_RECORDING_PHASE"),
+                ("--round", "KBENCH_RECORDING_ROUND"),
+                ("--attempt", "KBENCH_RECORDING_ATTEMPT"),
+            )
+        )
+        replace_key = (
+            "import json,pathlib; p=pathlib.Path('/tmp/kbench-kimi-config.json'); "
+            "c=json.loads(p.read_text()); c['providers']['harbor']['api_key']=pathlib.Path('/tmp/kbench-api-key').read_text().strip(); "
+            "p.write_text(json.dumps(c))"
+        )
+        command = (
+            "set -e; mkdir -p /logs/agent/.kimi; "
+            f"printf %s {config_q} > /tmp/kbench-kimi-config.json; "
+            "cp /tmp/kbench-kimi-config.json /tmp/kbench-kimi-config.redacted.json; "
+            "cp /tmp/kbench-kimi-config.redacted.json /logs/agent/.kimi/config.json.bak; "
+            "export PATH=\"$HOME/.local/bin:$PATH\"; "
+            "KIMI_TOOL_PYTHON=\"$(dirname \"$(readlink -f \"$(command -v kimi)\")\")/python\"; "
+            f"\"$KIMI_TOOL_PYTHON\" -c {shlex.quote(replace_key)}; "
+            f"\"$KIMI_TOOL_PYTHON\" /tmp/kbench-recording-proxy.py --target-base-url "
+            f"{shlex.quote(os.environ.get('KIMI_VENDOR_BASE_URL',''))} --output-dir /logs/agent/llmproxy/openai "
+            f"--host 127.0.0.1 --port 18080 {identity_args} & proxy=$!; "
+            "for n in $(seq 1 50); do curl -fsS http://127.0.0.1:18080/__kbench_health >/dev/null 2>&1 && break; sleep .2; done; "
+            "started_at=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ); "
+            "printf '{\"profile\":\"official_observed\",\"started_at\":\"%s\"}\n' \"$started_at\" > /logs/agent/execution-meta.json; "
+            f"set +e; kimi --config-file /tmp/kbench-kimi-config.json --print --output-format=stream-json --thinking --command={instruction_q} "
+            "2>/logs/agent/kimi-stderr.txt | tee /logs/agent/kimi-stream.jsonl /logs/agent/kimi-cli.txt >/dev/null; rc=${PIPESTATUS[0]}; "
+            "drain_rc=0; curl -fsS --max-time 125 'http://127.0.0.1:18080/__kbench_drain?timeout=120' >/dev/null || drain_rc=$?; "
+            "kill $proxy 2>/dev/null || true; wait $proxy 2>/dev/null || true; "
+            "if [ \"$rc\" -eq 0 ] && [ \"$drain_rc\" -ne 0 ]; then rc=$drain_rc; fi; "
+            "finished_at=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ); "
+            "printf '{\"profile\":\"official_observed\",\"exit_code\":%s,\"started_at\":\"%s\",\"finished_at\":\"%s\"}\n' \"$rc\" \"$started_at\" \"$finished_at\" > /logs/agent/execution-meta.json; "
+            "cp -a /root/.kimi/. /logs/agent/.kimi/ 2>/dev/null || true; "
+            "cp /tmp/kbench-kimi-config.redacted.json /logs/agent/.kimi/config.json.bak; "
+            "rm -f /tmp/kbench-api-key /tmp/kbench-kimi-config.json /tmp/kbench-kimi-config.redacted.json /tmp/kbench-recording-proxy.py; exit $rc"
+        )
+        try:
+            await self.exec_as_agent(environment, command=command, env=env)
+        except NonZeroAgentExitCodeError as exc:
+            if "exit 143" not in str(exc):
+                raise

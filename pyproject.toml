@@ -1,0 +1,36 @@
+[project]
+name = "novita-self-test"
+version = "0.2.0"
+description = "Multi-model Novita vendor development and acceptance runner"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = [
+    "httpx==0.28.1",
+    "jsonschema>=4.25",
+    "inspect-ai>=0.3.158",
+    "openai==2.14.0",
+    "pytest>=8.0",
+    "pyyaml>=6.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+markers = [
+    "integration: external artifact integration check",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["novita_self_test*"]
+
+[project.scripts]
+nvst = "novita_self_test.cli:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true

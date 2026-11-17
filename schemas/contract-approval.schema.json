@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract-approval.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["from_contract_hash", "to_contract_hash", "affected_suites", "approved_by", "reason"],
+  "properties": {
+    "from_contract_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "to_contract_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "affected_suites": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "approved_by": {"type": "string", "minLength": 1},
+    "reason": {"type": "string", "minLength": 1}
+  }
+}

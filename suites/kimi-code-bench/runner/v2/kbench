@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
+
+
+def _version() -> str:
+    manifest = json.loads((ROOT / "release-manifest.json").read_text())
+    return str(manifest["runner_version"])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="kbench", description="Novita Kimi Code Bench")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("install")
+    p = sub.add_parser("probe"); p.add_argument("contract"); p.add_argument("--api-key-env", default=None)
+    p = sub.add_parser("run"); p.add_argument("contract"); p.add_argument("--run-dir", required=True)
+    p = sub.add_parser("tail"); p.add_argument("run_dir")
+    p = sub.add_parser("stop"); p.add_argument("run_dir")
+    p = sub.add_parser("fetch"); p.add_argument("run_dir")
+    p = sub.add_parser("finalize"); p.add_argument("run_dir")
+    p = sub.add_parser("triage"); p.add_argument("run_dir")
+    p = sub.add_parser("metrics"); p.add_argument("run_dir")
+    p = sub.add_parser("itl"); p.add_argument("trial_dir"); p.add_argument("--threshold-ms", type=float, default=5000.0)
+    p = sub.add_parser("e2e-phases"); p.add_argument("run_dir"); p.add_argument("--high-step-threshold", type=int, default=100)
+    p = sub.add_parser("artifact-validate"); p.add_argument("trial_dir")
+    p = sub.add_parser("artifact-diff"); p.add_argument("left"); p.add_argument("right"); p.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    if args.command == "install":
+        print("Novita Kimi Code Bench uses the pinned Harbor/Terminal Bench 2 environment from run-contract.json")
+        return 0
+    if args.command == "probe":
+        from config import load_contract
+        from probe import probe_endpoint
+        c = load_contract(args.contract); env_name = args.api_key_env or c["authentication"].get("env_name")
+        key = os.environ.get(env_name, "") if env_name else ""
+        result = probe_endpoint(c["service"]["base_url"], key, c["service"]["model"], c["service"].get("headers", {}))
+        print(json.dumps(result, indent=2))
+        return 0 if result["passed"] else 1
+    if args.command == "run":
+        from runner import run_remote
+        return run_remote(args.contract, args.run_dir)
+    if args.command == "tail":
+        from status import refresh_remote_status
+        status = refresh_remote_status(args.run_dir)
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+        return 1 if status["state"] in {"failed", "unknown"} else 0
+    if args.command == "stop":
+        from runner import stop_remote
+        print(json.dumps(stop_remote(args.run_dir), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "fetch":
+        from runner import fetch_remote
+        print(fetch_remote(args.run_dir)); return 0
+    if args.command == "finalize":
+        from finalize import finalize
+        print(json.dumps(finalize(args.run_dir), ensure_ascii=False, indent=2)); return 0
+    if args.command == "triage":
+        from triage.triage_all import run
+        print(json.dumps(run(args.run_dir), ensure_ascii=False, indent=2)); return 0
+    if args.command == "metrics":
+        from metrics import write_report
+        from triage.triage_all import run
+        root = Path(args.run_dir)
+        snapshot = json.loads((root / "config.snapshot.json").read_text())
+        result = write_report(root, run(root), snapshot["tasks"], baseline_trials=int(snapshot["rounds"]))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["publishable"] else 1
+    if args.command == "itl":
+        from itl import main as itl_main
+        return itl_main(args.trial_dir, args.threshold_ms)
+    if args.command == "e2e-phases":
+        from e2e import write_report
+        print(json.dumps(write_report(args.run_dir, args.high_step_threshold), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "artifact-validate":
+        from artifact.validate import main as validate_main
+        return validate_main(args.trial_dir)
+    if args.command == "artifact-diff":
+        from artifact.diff import diff
+        output = diff(args.left, args.right)
+        print(json.dumps(output, ensure_ascii=False, indent=2) if args.json else f"different={output['different']}")
+        return 1 if output["different"] else 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,21 @@
+{
+  "model_family": "kimi-k3",
+  "base_url": "https://vendor.example/v1",
+  "served_model": "kimi-k3",
+  "api_key_env": "KIMI_API_KEY",
+  "headers": {
+    "X-Routing-Pool": "example"
+  },
+  "think_mode": "opensource",
+  "deployment_id": "deployment-reference",
+  "runtime_id": "runtime-reference",
+  "source_targets": [
+    {
+      "repo": "vllm-int",
+      "worktree": "/path/to/worktree",
+      "branch": "feature/example",
+      "commit": "0123456789abcdef",
+      "log_entrypoints": ["kubectl logs deployment/example"]
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+schema_version: 1
+model_id: kimi-k3
+display_name: Kimi K3
+model_families: [kimi-k3]
+requirements:
+  official_wiki_token: IMc2wtkCkit5c0kGRTfcuYDnn8d
+  official_doc_token: NGZxd8CYgosLA3xkPfjcbfnlnIf
+  stream_spec_wiki_token: LP9BwrmUBiAjYakQ3RdcnpFknLh
+  stream_spec_doc_token: SgIHdan76oGuidxoYxrcrgrvnqY
+  toolcall_wiki_token: KYmQwcaibiBYxWkWjP3cun83n5e
+  toolcall_doc_token: I2aKd9572oWM4cxXUVpcDdOanBg
+  toolcall_spreadsheet_token: Gii3sbMA1hAGIhtYtxxcgd3Zn3g
+  toolcall_sheet_id: cPoUBI
+  sop_wiki_url: https://moonshot.feishu.cn/wiki/VtHAwlYP7imapik8C4scELvgnxc
+  sop_doc_revision: 9
+  sop_content_sha256: 387d7d7490df14f200a02e77dace7b58578661bbf8fba487bbb57909ef1ad561
+  verifier_repository:
+    remote: https://github.com/MoonshotAI/kvv-k3.git
+    branch: k3
+    commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
+    checkout: vendor/kvv-k3
+    git_lfs_required: true
+execution:
+  row_order: exact
+acceptance_control:
+  global_stop:
+    validities: [service_invalid]
+    statuses: [blocked]
+    reasons: [runner_contract_invalid, artifact_contract_incomplete, runner_not_found, safety_failure]
+test_groups:
+  precision: ["7", "8", "9", "10", "11", "12", "13", "14", "15", "17"]
+  feature: ["1.0", "1.1", "1.2", "2", "3", "4", "5", "6", "18"]
+  optional_precision: ["16", "kimi-code-bench:extended"]
+acceptance_modes:
+  # Production order is required precision first, then feature coverage.
+  # BEAM and Kimi Code Bench remain explicitly selectable optional suites.
+  # Row 2 remains serial; rows 3..15 use their high request/worker budgets.
+  simple:
+    selectors: ["10", "11", "12", "17", "1.0", "1.1", "1.2", "2", "3", "4", "5", "6", "18"]
+    include_long: [deepswe]
+    deepswe_rounds: 1
+  full:
+    selectors: ["7", "8", "9", "10", "11", "12", "13", "14", "15", "17", "1.0", "1.1", "1.2", "2", "3", "4", "5", "6", "18"]
+    include_long: [deepswe]
+    deepswe_rounds: 3
+  precision-core:
+    # Scoped required precision run: toolcall thinking-effort rows plus
+    # three-round DeepSWE. Feature rows and OCR/MMMU are out of scope;
+    # optional BEAM and Code Bench run only through explicit selectors.
+    selectors: ["7", "8", "9", "17"]
+    include_long: [deepswe]
+    deepswe_rounds: 3
+  k3-sop:
+    # Moonshot K3 上线 SOP required checks first, then current Novita-owned
+    # required coverage. Optional BEAM and Code Bench are explicit add-ons.
+    source: moonshot-k3-sop
+    source_revision: 9
+    selectors: ["7", "8", "9", "10", "11", "12", "13", "14", "15", "5", "6", "3", "4", "1.0", "1.1", "2", "17", "18"]
+    include_long: [deepswe]
+    deepswe_rounds: 3
+  develop:
+    include_long: [deepswe]
+    deepswe_rounds: 1
+reporting:
+  sections: [acceptance]
+  columns:
+    - row_id
+    - requirement
+    - test_file
+    - parameter
+    - status
+    - validity
+    - actual
+    - official_raw
+    - difference
+    - runner_pin
+    - artifact_paths
+    - not_run_reason

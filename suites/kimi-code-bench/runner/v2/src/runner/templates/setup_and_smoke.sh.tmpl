@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cat > run-contract.json <<'CONTRACT_EOF'
+@@CONTRACT_JSON@@
+CONTRACT_EOF
+cat > config.snapshot.json <<'SNAPSHOT_EOF'
+@@SNAPSHOT_JSON@@
+SNAPSHOT_EOF
+TAG=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["run"]["tag"])')
+WORKDIR=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["remote"]["workdir"])')
+BASE_URL=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["service"]["base_url"])')
+MODEL=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["service"]["model"])')
+CONCURRENCY=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["run"]["concurrency"])')
+TASK_COUNT=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["task_selection"]["count"])')
+ROUNDS=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["run"]["rounds"])')
+PER_TASK_CONCURRENCY=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["execution_profile"]["per_task_concurrency"])')
+KIMI_REF=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["pins"]["kimi_cli_ref"])')
+HARBOR_VERSION=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["pins"]["harbor_version"])')
+HARBOR_PYTHON=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["pins"]["harbor_python"])')
+TERMINAL_REF=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["pins"]["terminal_bench_2_ref"])')
+UV_VERSION=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["pins"]["uv_version"])')
+HEADERS_JSON=$(python3 -c 'import json; print(json.dumps(json.load(open("config.snapshot.json"))["headers"], separators=(",", ":")))')
+CONTAINER_PROXY=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["remote"]["container_proxy"])')
+CACHE_ROOT=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["remote"]["runtime_cache_root"])')
+PREFLIGHT_ATTEMPTS=$(python3 -c 'import json; print(json.load(open("run-contract.json"))["preflight"]["attempts"])')
+TIMEOUT_MULTIPLIER=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["harbor_timeout_multipliers"]["timeout_multiplier"])')
+AGENT_TIMEOUT_MULTIPLIER=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["harbor_timeout_multipliers"]["agent_timeout_multiplier"])')
+VERIFIER_TIMEOUT_MULTIPLIER=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["harbor_timeout_multipliers"]["verifier_timeout_multiplier"])')
+AGENT_SETUP_TIMEOUT_MULTIPLIER=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["harbor_timeout_multipliers"]["agent_setup_timeout_multiplier"])')
+ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIER=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["harbor_timeout_multipliers"]["environment_build_timeout_multiplier"])')
+KIMI_MAX_RETRIES_PER_STEP=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["kimi_loop_control"]["max_retries_per_step"])')
+KIMI_MAX_STEPS_PER_RUN=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["kimi_loop_control"]["max_steps_per_run"])')
+HARBOR_N_ATTEMPTS=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["harbor_n_attempts"])')
+RECOVERY_ATTEMPTS=$(python3 -c 'import json; print(json.load(open("config.snapshot.json"))["recovery"]["attempts_per_abnormal_task"])')
+case "$PER_TASK_CONCURRENCY" in 1) ;; *) echo "per-task concurrency must be one" >&2; exit 1 ;; esac
+[ "$CONCURRENCY" -eq "$TASK_COUNT" ] || { echo "global concurrency must equal selected task count" >&2; exit 1; }
+RUN_ROOT="$WORKDIR/runner-bundle"; JOBS_ROOT="$WORKDIR/jobs"; TSV_ROOT="$WORKDIR/tsv"; AUTH_FILE="$WORKDIR/.kbench-api-key"; STATE_ROOT="$WORKDIR/state"
+mkdir -p "$WORKDIR" "$TSV_ROOT" "$JOBS_ROOT" "$STATE_ROOT/started" "$STATE_ROOT/active"
+rm -f "$WORKDIR/.kbench-done" "$WORKDIR/.kbench-failed" "$WORKDIR/.kbench-paused" "$WORKDIR/.kbench-pause-requested" "$WORKDIR/.kbench-exit-code"
+touch "$WORKDIR/.run_start_marker" "$WORKDIR/.kbench-running"
+printf '%s\n' "$BASHPID" > "$WORKDIR/.kbench-pid"
+set_phase() { printf '%s\n' "$1" > "$WORKDIR/.kbench-phase"; }
+finish_run() {
+  local rc=$?
+  trap - EXIT
+  printf '%s\n' "$rc" > "$WORKDIR/.kbench-exit-code"
+  rm -f "$AUTH_FILE" "$WORKDIR/.kbench-running"
+  if [ "$rc" -eq 0 ]; then
+    touch "$WORKDIR/.kbench-done"
+  elif [ "$rc" -eq 143 ] && [ -f "$WORKDIR/.kbench-pause-requested" ]; then
+    touch "$WORKDIR/.kbench-paused"
+  else
+    touch "$WORKDIR/.kbench-failed"
+  fi
+  exit "$rc"
+}
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap finish_run EXIT
+if [ ! -s "$AUTH_FILE" ]; then echo "missing remote authentication handoff" >&2; exit 1; fi
+set_phase remote_setup
+command -v docker
+docker version --format 'docker {{.Server.Version}}'
+export PATH="$HOME/.local/bin:$PATH"
+if ! command -v uv >/dev/null 2>&1; then
+  timeout 300 env HTTP_PROXY="$CONTAINER_PROXY" HTTPS_PROXY="$CONTAINER_PROXY" NO_PROXY="127.0.0.1,localhost" python3 -m pip install --user --quiet "uv==$UV_VERSION"
+fi
+UV_ACTUAL=$(uv --version)
+case "$UV_ACTUAL" in "uv $UV_VERSION "*) ;; *) echo "uv version mismatch: $UV_ACTUAL" >&2; exit 1 ;; esac
+python3 -c 'import json; from pathlib import Path; Path("tasks.txt").write_text("".join(f"{x}\n" for x in json.load(open("config.snapshot.json"))["tasks"]))'
+
+set_phase preflight
+PREFLIGHT_TASK=$(sed -n '1p' tasks.txt)
+PREFLIGHT_IMAGE="alexgshaw/${PREFLIGHT_TASK}:20251031"
+timeout 600 docker pull "$PREFLIGHT_IMAGE" >/dev/null
+PROXY_ADDRESS=${CONTAINER_PROXY#*://}
+PROXY_HOST=${PROXY_ADDRESS%:*}
+PROXY_PORT=${PROXY_ADDRESS##*:}
+docker run --rm --entrypoint bash -e PROXY_HOST="$PROXY_HOST" -e PROXY_PORT="$PROXY_PORT" "$PREFLIGHT_IMAGE" -lc 'timeout 10 bash -c "</dev/tcp/$PROXY_HOST/$PROXY_PORT"'
+HTTP_PROXY="$CONTAINER_PROXY" HTTPS_PROXY="$CONTAINER_PROXY" NO_PROXY="127.0.0.1,localhost" python3 "$WORKDIR/remote_preflight.py" --snapshot "$WORKDIR/config.snapshot.json" --auth-file "$AUTH_FILE" --output-dir "$WORKDIR/preflight" --attempts "$PREFLIGHT_ATTEMPTS" > "$WORKDIR/preflight.log"
+
+set_phase remote_setup
+timeout 2400 python3 "$WORKDIR/runtime_cache.py" --cache-root "$CACHE_ROOT" --uv-path "$(command -v uv)" --uv-version "$UV_VERSION" --harbor-version "$HARBOR_VERSION" --harbor-python "$HARBOR_PYTHON" --kimi-ref "$KIMI_REF" --terminal-ref "$TERMINAL_REF" --proxy "$CONTAINER_PROXY" --output "$WORKDIR/runtime-versions.json" > "$WORKDIR/runtime-cache.log" 2>&1
+HARBOR_BIN=$(python3 -c 'import json; print(json.load(open("runtime-versions.json"))["paths"]["harbor"])')
+TERMINAL_SOURCE=$(python3 -c 'import json; print(json.load(open("runtime-versions.json"))["paths"]["terminal_bench_2_source"])')
+KIMI_CLI_WHEEL_PATH=$(python3 -c 'import json; print(json.load(open("runtime-versions.json"))["paths"]["kimi_cli_wheel"])')
+BENCH_ROOT="$WORKDIR/terminal-bench-2"
+git -C "$TERMINAL_SOURCE" worktree add --detach "$BENCH_ROOT" "$TERMINAL_REF" > "$WORKDIR/terminal-worktree.log" 2>&1
+( [ "$(git -C "$BENCH_ROOT" rev-parse HEAD)" = "$TERMINAL_REF" ] )
+echo "Kimi CLI wheel: $KIMI_CLI_WHEEL_PATH"
+mkdir -p "$RUN_ROOT/tests_ai/accuracy_smoke"; touch "$RUN_ROOT/tests_ai/__init__.py" "$RUN_ROOT/tests_ai/accuracy_smoke/__init__.py"; cp "$WORKDIR/local_kimi_cli_vendor_agent.py" "$RUN_ROOT/tests_ai/accuracy_smoke/local_kimi_cli_vendor_agent.py"; cp "$WORKDIR/recording_proxy.py" "$RUN_ROOT/tests_ai/accuracy_smoke/recording_proxy.py"
+AGENT_IMPORT="tests_ai.accuracy_smoke.local_kimi_cli_vendor_agent:LocalKimiCliVendor"; MODEL_ARG="kimi/$MODEL"
+python3 -c 'import json,sys; c=json.load(open("config.snapshot.json")); rounds=int(sys.argv[1]); p=[(t,r,r) for r in range(1,rounds+1) for t in c["tasks"]]; open("baseline.queue","w").writelines(f"{t}\t{r}\t{a}\n" for t,r,a in p)' "$ROUNDS"
+run_one() {
+  local task="$1" round_no="$2" attempt_no="$3" phase="$4"; local task_dir="$BENCH_ROOT/$task" task_jobs="$JOBS_ROOT/$task" output="$TSV_ROOT/${phase}-${round_no}-${attempt_no}__${task}.tsv" marker="${phase}-${round_no}-${attempt_no}__${task}"; mkdir -p "$task_jobs"
+  touch "$STATE_ROOT/started/$marker" "$STATE_ROOT/active/$marker"
+  [ -d "$task_dir" ] || { printf '%s\t%s\t%s\t%s\t0\t0\t1\n' "$task" "$phase" "$round_no" "$attempt_no" > "$output"; rm -f "$STATE_ROOT/active/$marker"; return; }; timeout 600 docker pull "alexgshaw/${task}:20251031" >/dev/null 2>&1 || true
+  local job_id="job_${TAG}" attempt_id container_id task_id route_path; IFS=$'\t' read -r attempt_id container_id task_id route_path < <(python3 -c 'import hashlib,sys,uuid; j,t,p,r,a=sys.argv[1:6]; k="|".join((j,t,p,r,a)); x=str(uuid.uuid5(uuid.NAMESPACE_URL,k)); c=str(100000+int(hashlib.sha256(k.encode()).hexdigest()[:8],16)%900000000); q=str(100000+int(hashlib.sha256(t.encode()).hexdigest()[:8],16)%900000000); print("\t".join((x,c,q,f"/routes/{j}-{x}-openai-{c}")))' "$job_id" "$task" "$phase" "$round_no" "$attempt_no")
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$RUN_ROOT${PYTHONPATH:+:$PYTHONPATH}" KIMI_CLI_WHEEL_PATH="$KIMI_CLI_WHEEL_PATH" KIMI_VENDOR_BASE_URL="$BASE_URL" KIMI_VENDOR_API_KEY_FILE="$AUTH_FILE" KIMI_VENDOR_CONTAINER_PROXY="$CONTAINER_PROXY" KIMI_VENDOR_EXTRA_HEADERS_JSON="$HEADERS_JSON" KIMI_VENDOR_EXECUTION_PROFILE=official_observed KIMI_MAX_RETRIES_PER_STEP="$KIMI_MAX_RETRIES_PER_STEP" KIMI_MAX_STEPS_PER_RUN="$KIMI_MAX_STEPS_PER_RUN" KBENCH_RECORDING_JOB_ID="$job_id" KBENCH_RECORDING_ATTEMPT_ID="$attempt_id" KBENCH_RECORDING_CONTAINER_ID="$container_id" KBENCH_RECORDING_TASK_ID="$task_id" KBENCH_RECORDING_TASK_LABEL="$task" KBENCH_RECORDING_ROUTE_PATH="$route_path" KBENCH_RECORDING_PHASE="$phase" KBENCH_RECORDING_ROUND="$round_no" KBENCH_RECORDING_ATTEMPT="$attempt_no" KIMI_MODEL_CAPABILITIES=thinking KIMI_MODEL_THINKING_KEEP=all "$HARBOR_BIN" run -p "$task_dir" --jobs-dir "$task_jobs" --agent-import-path "$AGENT_IMPORT" -m "$MODEL_ARG" --n-concurrent 1 --n-attempts "$HARBOR_N_ATTEMPTS" --timeout-multiplier "$TIMEOUT_MULTIPLIER" --agent-timeout-multiplier "$AGENT_TIMEOUT_MULTIPLIER" --verifier-timeout-multiplier "$VERIFIER_TIMEOUT_MULTIPLIER" --agent-setup-timeout-multiplier "$AGENT_SETUP_TIMEOUT_MULTIPLIER" --environment-build-timeout-multiplier "$ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIER" > "$task_jobs/harbor.log" 2>&1 || true
+  if ! python3 "$WORKDIR/archive_trial.py" --task "$task" --jobs-root "$task_jobs" --output "$output" --phase "$phase" --round "$round_no" --attempt "$attempt_no" --job-id "$job_id" --attempt-id "$attempt_id" --container-id "$container_id" --task-id "$task_id" --route-path "$route_path"; then
+    rm -f "$STATE_ROOT/active/$marker"
+    return 1
+  fi
+  rm -f "$STATE_ROOT/active/$marker"
+}
+run_task_pipeline() {
+  local phase="$1" task="$2" round_no
+  if [ "$phase" = "baseline" ]; then
+    for round_no in $(seq 1 "$ROUNDS"); do
+      run_one "$task" "$round_no" "$round_no" "$phase"
+    done
+  else
+    run_one "$task" 0 1 "$phase"
+  fi
+}
+run_queue() {
+  local phase="$1" queue="$2" task queued_round attempt_no pid
+  if [ "$phase" = "baseline" ]; then
+    # Serialized per-task pipelines share one global worker budget: each task
+    # advances through its own rounds as soon as it finishes, so the selected
+    # task-count concurrency stays saturated without a barrier between rounds.
+    local -a pids=() alive=()
+    while IFS=$'\t' read -r task queued_round attempt_no; do
+      [ -n "$task" ] || continue
+      [ "$queued_round" = "1" ] || continue
+      while [ "${#pids[@]}" -ge "$CONCURRENCY" ]; do
+        wait -n "${pids[@]}" || true
+        alive=()
+        for pid in "${pids[@]}"; do
+          kill -0 "$pid" 2>/dev/null && alive+=("$pid") || true
+        done
+        pids=("${alive[@]}")
+      done
+      run_task_pipeline "$phase" "$task" &
+      pids+=("$!")
+    done < "$queue"
+    for pid in "${pids[@]}"; do wait "$pid" || true; done
+    return
+  fi
+  if [ "$phase" = "recovery" ]; then
+    local -a pids=() alive=()
+    run_recovery_task() {
+      local recovery_task="$1" recovery_attempt recovery_output
+      for recovery_attempt in $(seq 1 "$RECOVERY_ATTEMPTS"); do
+        run_one "$recovery_task" 0 "$recovery_attempt" "$phase" || true
+        recovery_output="$TSV_ROOT/recovery-0-${recovery_attempt}__${recovery_task}.tsv"
+        [ -f "$recovery_output" ] || continue
+        [ "$(awk -F '\t' 'NR==1 {print $7}' "$recovery_output")" = "0" ] && break
+      done
+    }
+    while IFS=$'\t' read -r task queued_round attempt_no; do
+      [ -n "$task" ] || continue
+      while [ "${#pids[@]}" -ge "$CONCURRENCY" ]; do
+        wait -n "${pids[@]}" || true
+        alive=()
+        for pid in "${pids[@]}"; do
+          kill -0 "$pid" 2>/dev/null && alive+=("$pid") || true
+        done
+        pids=("${alive[@]}")
+      done
+      run_recovery_task "$task" &
+      pids+=("$!")
+    done < "$queue"
+    for pid in "${pids[@]}"; do wait "$pid" || true; done
+  fi
+}
+set_phase baseline
+run_queue baseline baseline.queue
+python3 -c 'import json,pathlib; c=json.load(open("config.snapshot.json")); files=list(pathlib.Path("tsv").glob("baseline-*.tsv")); assert len(files)==c["expected_trial_count"], f"baseline accounting mismatch: {len(files)}"'
+python3 -c 'import pathlib; bad=set(); [bad.add(p.read_text().split("\t")[0]) for p in pathlib.Path("tsv").glob("baseline-*__*.tsv") if len(p.read_text().split("\t"))>=7 and p.read_text().split("\t")[6].strip()=="1"]; pathlib.Path("recovery.queue").write_text("".join(f"{t}\t0\t1\n" for t in pathlib.Path("tasks.txt").read_text().splitlines() if t in bad))'
+set_phase recovery
+[ -s recovery.queue ] && run_queue recovery recovery.queue || true
+printf 'task\tphase\tround\tattempt\ttrials\tsuccesses\tabnormal\tjob_root\n' > "$WORKDIR/trial-records.tsv"; cat "$TSV_ROOT"/*.tsv >> "$WORKDIR/trial-records.tsv" 2>/dev/null || true
+set_phase archive
+tar --sort=name --mtime='UTC 1970-01-01' -czf "$WORKDIR/remote.tar.gz" -C "$WORKDIR" jobs trial-records.tsv config.snapshot.json run-contract.json preflight preflight.log runtime-cache.log runtime-versions.json terminal-worktree.log
+echo "run_complete=$(wc -l < "$WORKDIR/trial-records.tsv")"
+set_phase done

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "beam-judge-checkpoint.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chat_id", "question_type", "question_index", "score", "error_class", "error"],
+  "properties": {
+    "chat_id": {"type": "string", "minLength": 1},
+    "question_type": {"type": "string", "minLength": 1},
+    "question_index": {"type": "integer", "minimum": 0},
+    "score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "error_class": {"type": ["string", "null"]},
+    "error": {"type": ["string", "null"]}
+  },
+  "oneOf": [
+    {"properties": {"score": {"type": "number"}, "error_class": {"type": "null"}, "error": {"type": "null"}}},
+    {"properties": {"score": {"type": "null"}, "error_class": {"type": "string"}, "error": {"type": "string"}}}
+  ]
+}

@@ -1,0 +1,136 @@
+schema_version: 1
+
+source:
+  wiki_url: https://moonshot.feishu.cn/wiki/Av7gw9Fg6il1VKkVFMEc84fRn9g
+  document_id: Fqhcd3Jn8osGxVx3x7yc46rHnpc
+  document_revision: 122
+  fetched_at: "2026-09-14T00:00:00+08:00"
+  interface_sheet:
+    token: C1uasn5wMhgX4jtSmebcYkjQnxe
+    sheet_id: 7ZVUi3
+    revision: 34
+    range: A1:B11
+  accuracy_sheet:
+    token: C1uasn5wMhgX4jtSmebcYkjQnxe
+    sheet_id: cPoUBI
+    revision: 34
+    range: A1:C15
+  verifier_repository:
+    remote: https://github.com/MoonshotAI/kvv-k3.git
+    branch: k3
+    commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
+    checkout: vendor/kvv-k3
+    git_lfs_required: true
+    lfs_paths:
+      - testdata/prompt_token_cases/*.jsonl
+      - testdata/prompt_token_cases/images/*.png
+      - testdata/toolcall_reject_cases/rejected_case.jsonl
+      - toolcall_benchmark/toolcall_thinking_samples.stable2.jsonl
+  kvv_repo_commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
+  stream_spec_revision: 244
+  contract_boundary: >-
+    This snapshot records K3-flash requirements from the official document. The
+    local executable matrix uses the pinned official MoonshotAI kvv-k3 source for all
+    KVV-derived tests. Closed-source Kimi Code Bench and Moonshot stress testing
+    remain external acceptance gates.
+
+novita_official_rows: []
+acceptance:
+  - row_id: "1.0"
+    table_index: 0
+    job: Streaming Output Spec / P0
+    test_file: suites/novita-api/tests/streaming/test_stream_spec.py
+    parameter: Official self-validation file, STREAM_SPEC_PRIORITY=P0; uncovered spec items default to passed
+    official_result_raw: null
+    official_result: {kind: null, value: null}
+    document_self_test_result_raw: null
+
+  - row_id: "1.1"
+    table_index: 1
+    job: Streaming Output Spec / P1
+    test_file: suites/novita-api/tests/streaming/test_stream_spec.py
+    parameter: Official self-validation file, STREAM_SPEC_PRIORITY=P1; uncovered spec items default to passed
+    official_result_raw: null
+    official_result: {kind: null, value: null}
+    document_self_test_result_raw: null
+
+  - row_id: "2"
+    table_index: 2
+    job: Image input contract
+    test_file: vendor-img-testcases-inhouse-3.jsonl
+    parameter: 25 fixture requests covering image_url forms, message roles, finish reasons, formats, and up to 1000 images
+    official_result_raw: 25 cases
+    official_result: {kind: count_only, value: {passed: 25, skipped: 0}}
+    document_self_test_result_raw: null
+
+  - row_id: "3"
+    table_index: 3
+    job: pytest / params
+    test_file: kvv-k3/tests/params/
+    parameter: Flash KVV parameter defaults and 128-character tool-name acceptance; 10 independent iterations
+    official_result_raw: 18 Pass
+    official_result: {kind: count_only, value: {passed: 18, skipped: 0}}
+    document_self_test_result_raw: 18 pass / 18
+
+  - row_id: "4"
+    table_index: 4
+    job: pytest / tool call JSON schema
+    test_file: kvv-k3/tests/tool_call_json_schema/
+    parameter: Flash KVV schema validation, including $ref sibling and description cases; 10 independent iterations
+    official_result_raw: 408 Pass
+    official_result: {kind: count_only, value: {passed: 408, skipped: 0}}
+    document_self_test_result_raw: 408 pass / 408
+
+  - row_id: "5"
+    table_index: 5
+    job: pytest / K3-flash features
+    test_file: kvv-k3/tests/k3_features/
+    parameter: Flash KVV feature contract, updated thinking/reasoning_effort and response-format behavior; 10 independent iterations
+    official_result_raw: "108 Pass, 18 skipped"
+    official_result: {kind: count_with_skip, value: {passed: 108, skipped: 18}}
+    document_self_test_result_raw: 108 pass 18 skip / 126
+
+  - row_id: "6"
+    table_index: 6
+    job: pytest / prompt tokens
+    test_file: kvv-k3/tests/prompt_tokens/
+    parameter: Flash KVV prompt-token fixtures and token-parameter compatibility; 10 independent iterations over 74 collected cases
+    official_result_raw: 59 Pass
+    official_result: {kind: count_only, value: {passed: 59, skipped: 0}}
+    document_self_test_result_raw: 59 pass / 59
+
+  - row_id: "7"
+    table_index: 7
+    job: Toolcall thinking effort / max
+    test_file: kvv-k3/eval.py kimi_toolcall
+    parameter: temperature 1.0, top_p 0.95, max_tokens 32768, thinking enabled, effort max; 71 samples × 5 epochs = 355 trials
+    official_result_raw: "0.979"
+    official_result: {kind: float_pct, value: 0.979}
+    document_self_test_result_raw: not published
+
+  - row_id: "8"
+    table_index: 8
+    job: OCRBench / effort max
+    test_file: kvv-k3/eval.py ocrbench
+    parameter: temperature 1.0, top_p 0.95, max_tokens 16384, thinking enabled, effort max
+    official_result_raw: "0.883"
+    official_result: {kind: float_pct, value: 0.883}
+    document_self_test_result_raw: not published
+
+  - row_id: "9"
+    table_index: 9
+    job: MMMU Pro / effort max
+    test_file: kvv-k3/eval.py mmmu
+    parameter: temperature 1.0, top_p 0.95, max_tokens 98304, thinking enabled, effort max
+    official_result_raw: "0.785"
+    official_result: {kind: float_pct, value: 0.785}
+    document_self_test_result_raw: not published
+
+  - row_id: "10"
+    table_index: 10
+    job: DeepSWE
+    test_file: deep-swe-113 via Pier
+    parameter: kimi-code 0.29.0, effort max, pinned config, three rounds, one task per Pier job, task-local lock, error-only rerun
+    official_result_raw: "57.7, 67.3, 63.7; avg@3 62.8; avg output tokens 77.9K; avg steps 96.3"
+    official_result: {kind: float_pct, value: 0.628}
+    document_self_test_result_raw: not tested

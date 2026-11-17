@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Run nvst locally against an endpoint without hand-writing service-access JSON.
+#
+#   scripts/kvh --base-url https://host/v1 --served-model kimi-k3 [--think-mode opensource|kimi] \
+#               [--headers-json '{"X-Route":"a"}'] [--model-family <profile model>] -- develop --model kimi-k3 --select 6
+#
+# Token: $KIMI_API_KEY if set, otherwise resolved by URL from the private registry
+# (~/.config/novita-kimi-vendor/credentials.json, see scripts/nvst_credentials.py).
+# The token is passed only via environment; the generated service-access file is secret-free.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+base_url="" served_model="" think_mode="opensource" headers_json="{}" family=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base-url) base_url="$2"; shift 2 ;;
+    --served-model) served_model="$2"; shift 2 ;;
+    --think-mode) think_mode="$2"; shift 2 ;;
+    --headers-json) headers_json="$2"; shift 2 ;;
+    --model-family) family="$2"; shift 2 ;;
+    --) shift; break ;;
+    -h|--help) sed -n 2,9p "$0"; exit 0 ;;
+    *) echo "unknown option: $1 (nvst arguments go after --)" >&2; exit 2 ;;
+  esac
+done
+[ -n "$base_url" ] && [ -n "$served_model" ] || { echo "--base-url and --served-model are required" >&2; exit 2; }
+[ $# -gt 0 ] || { echo "missing nvst command after --, e.g. -- develop --model kimi-k3 --select 6" >&2; exit 2; }
+
+# model_family must be one the chosen profile accepts: default to nvst's --model value.
+if [ -z "$family" ]; then
+  prev=""
+  for a in "$@"; do
+    [ "$prev" = "--model" ] && { family="$a"; break; }
+    prev="$a"
+  done
+  family="${family:-kimi-k3}"
+fi
+
+cd "$root"
+if [ -z "${KIMI_API_KEY:-}" ]; then
+  auth="$(uv run --quiet python scripts/nvst_credentials.py resolve --url "$base_url" --role endpoint)" || {
+    echo "no token: export KIMI_API_KEY, or register this URL with scripts/nvst_credentials.py set" >&2; exit 2; }
+  KIMI_API_KEY="${auth#Authorization: Bearer }"
+fi
+export KIMI_API_KEY
+
+access_dir="$root/cases"
+access="$(BASE_URL="$base_url" MODEL="$served_model" THINK="$think_mode" HEADERS="$headers_json" FAMILY="$family" \
+  ACCESS_DIR="$access_dir" python3 - <<'EOF'
+import hashlib, json, os, re
+doc = {
+    "model_family": os.environ["FAMILY"],
+    "base_url": os.environ["BASE_URL"],
+    "served_model": os.environ["MODEL"],
+    "api_key_env": "KIMI_API_KEY",
+    "headers": json.loads(os.environ["HEADERS"]),
+    "think_mode": os.environ["THINK"],
+    "deployment_id": re.sub(r"[^A-Za-z0-9._-]+", "-", os.environ["BASE_URL"]).strip("-"),
+    "runtime_id": os.environ["MODEL"],
+    "source_targets": [],
+}
+if any(k.lower() == "authorization" for k in doc["headers"]):
+    raise SystemExit("do not put Authorization in --headers-json")
+body = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+path = os.path.join(os.environ["ACCESS_DIR"], f"service-access-{hashlib.sha256(body.encode()).hexdigest()[:12]}.json")
+with open(path, "w") as f:
+    f.write(body)
+print(path)
+EOF
+)"
+
+cmd="$1"; shift
+case "$cmd" in
+  develop|accept|doctor) exec uv run nvst "$cmd" --service-access "$access" "$@" ;;
+  *) exec uv run nvst "$cmd" "$@" ;;
+esac

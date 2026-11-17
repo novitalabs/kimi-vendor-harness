@@ -1,0 +1,15 @@
+.env
+.venv/
+*.egg-info/
+reports/
+logs/
+3rdparty/
+runs/
+cases/service-access*.json
+!cases/service-access.example.json
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.DS_Store
+.ruff_cache/
+.mypy_cache/
