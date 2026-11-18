@@ -79,6 +79,35 @@ def _compose_suites(raw_suites: list[Any], catalog_path: Path | None) -> list[An
     return composed
 
 
+# Machine-specific locations of external runtimes. They describe where a suite runs, not what it
+# tests, so a host overrides them with an environment variable instead of editing the shared suite
+# definitions. The suite definition keeps the default.
+HOST_SETTING_ENV = {
+    "runtime_root": "NVST_DEEPSWE_ROOT",
+    "pier_bin": "NVST_PIER_BIN",
+    "host": "NVST_CODE_BENCH_HOST",
+    "workdir_root": "NVST_CODE_BENCH_WORKDIR_ROOT",
+    "runtime_cache_root": "NVST_CODE_BENCH_CACHE_ROOT",
+    "container_proxy": "NVST_CODE_BENCH_CONTAINER_PROXY",
+}
+
+
+def host_setting(key: str, default: Any = None) -> Any:
+    """Return the host override, or the supplied default when no override is set."""
+    return os.environ.get(HOST_SETTING_ENV[key]) or default
+
+
+def required_host_setting(key: str, configured: Any = None) -> str:
+    """Resolve a host setting; fail clearly when a public profile has no local value."""
+    value = host_setting(key, configured)
+    if value is None or not str(value).strip():
+        raise ConfigError(
+            "host_setting_missing",
+            f"set {HOST_SETTING_ENV[key]} before running this host-dependent suite",
+        )
+    return str(value)
+
+
 def workspace_root() -> Path:
     return Path(__file__).resolve().parents[2]
 

@@ -591,9 +591,6 @@ suites:
       - low
       env:
         INSPECT_LOG_DIR: '{suite_dir}'
-        HTTP_PROXY: http://172.17.0.1:1081
-        HTTPS_PROXY: http://172.17.0.1:1081
-        NO_PROXY: api.ppio.com,localhost,127.0.0.1
       official_score: 0.9
       tolerance_pp: 2.0
       tolerance_mode: lower_bound
@@ -651,9 +648,6 @@ suites:
       - high
       env:
         INSPECT_LOG_DIR: '{suite_dir}'
-        HTTP_PROXY: http://172.17.0.1:1081
-        HTTPS_PROXY: http://172.17.0.1:1081
-        NO_PROXY: api.ppio.com,localhost,127.0.0.1
       official_score: 0.89
       tolerance_pp: 2.0
       tolerance_mode: lower_bound
@@ -711,9 +705,6 @@ suites:
       - max
       env:
         INSPECT_LOG_DIR: '{suite_dir}'
-        HTTP_PROXY: http://172.17.0.1:1081
-        HTTPS_PROXY: http://172.17.0.1:1081
-        NO_PROXY: api.ppio.com,localhost,127.0.0.1
       tolerance_pp: 2.0
       tolerance_mode: lower_bound
       runner_fingerprint:
@@ -770,9 +761,6 @@ suites:
       - low
       env:
         INSPECT_LOG_DIR: '{suite_dir}'
-        HTTP_PROXY: http://172.17.0.1:1081
-        HTTPS_PROXY: http://172.17.0.1:1081
-        NO_PROXY: api.ppio.com,localhost,127.0.0.1
       official_score: 0.79
       tolerance_pp: 2.0
       tolerance_mode: lower_bound
@@ -830,9 +818,6 @@ suites:
       - high
       env:
         INSPECT_LOG_DIR: '{suite_dir}'
-        HTTP_PROXY: http://172.17.0.1:1081
-        HTTPS_PROXY: http://172.17.0.1:1081
-        NO_PROXY: api.ppio.com,localhost,127.0.0.1
       official_score: 0.81
       tolerance_pp: 2.0
       tolerance_mode: lower_bound
@@ -890,9 +875,6 @@ suites:
       - max
       env:
         INSPECT_LOG_DIR: '{suite_dir}'
-        HTTP_PROXY: http://172.17.0.1:1081
-        HTTPS_PROXY: http://172.17.0.1:1081
-        NO_PROXY: api.ppio.com,localhost,127.0.0.1
       tolerance_pp: 2.0
       tolerance_mode: lower_bound
       runner_fingerprint:
@@ -1013,8 +995,7 @@ suites:
         max_reruns: 1
         scheduling: batch_after_formal
       transport: local
-      runtime_root: /srv/kvh/deepswe
-      pier_bin: /srv/kvh/venvs/pier/bin/pier
+      # Host-specific paths are supplied through NVST_DEEPSWE_ROOT and NVST_PIER_BIN.
       expected_deep_swe_commit: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
       expected_pier_version: 0.3.1
       expected_tasks: 113
@@ -1129,11 +1110,8 @@ suites:
         scheduling: immediate
       concurrency: 89
       remote:
-        host: build-server
+        # Host-specific values are required through NVST_CODE_BENCH_* environment variables.
         port: 22
-        workdir_root: /srv/kvh/kbench-runs
-        container_proxy: http://172.17.0.1:1081
-        runtime_cache_root: /srv/kvh/.kbench-cache
       runner_fingerprint:
         entrypoint: novita Kimi Code Bench runner/v2 kbench
         concurrency_scope: task_count

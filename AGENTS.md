@@ -27,7 +27,7 @@ read-only.
 - `suites/novita-api/`, `suites/kimi-code-bench/`, and `suites/deepswe/` are
   writable Novita-owned source. Preserve the imported subtree ancestry.
 - Keep Pier and the 113-task public deepSWE corpus external at
-  `/srv/kvh/deepswe/` on a prepared host. deepSWE is local-only and must not
+  the path in `NVST_DEEPSWE_ROOT` on a prepared host. deepSWE is local-only and must not
   add an SSH fallback.
 - Generated evidence belongs only in ignored `runs/`. A pass requires current,
   complete artifacts for the run's pinned requirements revision. Walle's
@@ -55,7 +55,7 @@ its two toolcall recovery cases must produce non-empty valid JSON arguments.
   add-ons.
 - Formal `accept` rejects a dirty working tree. `develop` records dirty
   content fingerprints, and new runs pin every executable profile input by hash.
-- OpenClaw pytest cases retain secret-safe response body, safe response headers,
+- Replay pytest cases retain secret-safe response body, safe response headers,
   and status metadata under the suite artifact directory, including failures.
 - K3 Stream p0/p1/p2 run the exact Moonshot Docx revision 244 single-file snapshot;
   its code and skip behavior are authoritative, and uncovered spec prose does

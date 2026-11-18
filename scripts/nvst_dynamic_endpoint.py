@@ -74,7 +74,7 @@ def materialize_service_access(
         **identity,
         "api_key_env": SECRET_ENV,
         "deployment_id": f"dynamic-{digest[:12]}",
-        "runtime_id": "build-server-dynamic-endpoint",
+        "runtime_id": "dynamic-endpoint",
         "source_targets": [],
     }
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)

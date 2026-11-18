@@ -237,7 +237,7 @@ score fails only when it is more than the configured tolerance below the lowest
 official observation. Positive differences, including differences greater than
 the tolerance, do not fail. Reports retain the signed difference for review.
 
-OpenClaw writes `response.body`, a safe response-header map, and status/body hash
+Replay writes `response.body`, a safe response-header map, and status/body hash
 metadata for every case. These files are included in `suite-result.json`, so a
 failed develop diagnosis points directly to the preserved response. Runtime
 schema validation rejects unknown or missing run/result fields before use.

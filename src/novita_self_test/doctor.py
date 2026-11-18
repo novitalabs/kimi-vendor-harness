@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .adapters.deepswe_remote import verify_runtime
-from .config import ConfigError, JudgeAccess, ModelProfile, ServiceAccess, workspace_root
+from .config import ConfigError, JudgeAccess, ModelProfile, ServiceAccess, required_host_setting, workspace_root
 from .orchestrator import repository_pins
 from .schema_validation import validation_error
 from .service_probe import probe_service
@@ -583,26 +583,33 @@ def run_doctor(
     runtime_root: Path | None = None
     if deepswe is not None:
         config = deepswe.config
-        runtime_root = Path(str(config.get("runtime_root", "")))
-        preflight = verify_runtime(
-            runtime_root=str(config.get("runtime_root", "")),
-            expected_commit=str(config.get("expected_deep_swe_commit", "")),
-            expected_pier_version=str(config.get("expected_pier_version", "")),
-            expected_tasks=int(config.get("expected_tasks", 0)),
-            pier_bin=str(config.get("pier_bin", "pier")),
-        )
-        checks.append(
-            _check(
-                "deepswe_runtime",
-                preflight.get("status") == "passed",
-                reason=str(preflight.get("reason") or "deepswe preflight failed"),
-                details={
-                    "expected": preflight.get("expected") or {},
-                    "observed": preflight.get("observed") or {},
-                    "mismatches": preflight.get("mismatches") or {},
-                },
+        try:
+            runtime_root = Path(required_host_setting("runtime_root", config.get("runtime_root")))
+            pier_bin = required_host_setting("pier_bin", config.get("pier_bin"))
+        except ConfigError as exc:
+            checks.append(_check("deepswe_runtime", False, reason=str(exc)))
+            runtime_root = None
+            pier_bin = None
+        else:
+            preflight = verify_runtime(
+                runtime_root=str(runtime_root),
+                expected_commit=str(config.get("expected_deep_swe_commit", "")),
+                expected_pier_version=str(config.get("expected_pier_version", "")),
+                expected_tasks=int(config.get("expected_tasks", 0)),
+                pier_bin=pier_bin,
             )
-        )
+            checks.append(
+                _check(
+                    "deepswe_runtime",
+                    preflight.get("status") == "passed",
+                    reason=str(preflight.get("reason") or "deepswe preflight failed"),
+                    details={
+                        "expected": preflight.get("expected") or {},
+                        "observed": preflight.get("observed") or {},
+                        "mismatches": preflight.get("mismatches") or {},
+                    },
+                )
+            )
 
     if online_canary:
         checks.extend(

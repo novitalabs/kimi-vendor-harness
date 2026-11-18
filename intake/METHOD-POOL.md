@@ -15,10 +15,14 @@ a plain grep is wrong because manifest paths are cwd-relative.
 | `vendor/kvv-k3/tests/toolcall_reject_cases/test_toolcall_id.py` | Malformed tool-call requests (e.g. history tool call without `function.name`) are rejected with HTTP 400. Cases: `testdata/toolcall_reject_cases/rejected_case.jsonl`. | Listed in the kvv-k3 README as an official verifier (CI job `verify_toolcall_reject`), but absent from the K3 doc-444 row matrix. First candidate to raise when a new official document arrives. Sends `thinking` in Kimi style only. |
 | `vendor/kvv-k3/verify_params_k3.py` | K3 parameter constraints, standalone CLI. | Overlaps row 3 (`tests/params`). |
 | `vendor/kvv-k3/verify_tool_call_json_schema.py` | Walle MFJS schema cases, standalone CLI. | Overlaps row 4 (`tests/tool_call_json_schema`). |
-| `vendor/kvv-k3/verify_params.py` | K2.5 parameter constraints. | Not applicable to K3. |
 | `vendor/kvv-k3/retry_with_kimi.py` | Retry wrapper for Inspect evals. | Tooling, not a check. |
 
 ## Novita methods (suites/novita-api)
+
+Before writing an endpoint test for an output-parser defect, use the framework-neutral
+`suites/novita-api/tests/parse_contract_vectors.jsonl` contract. It is the preferred method for
+cases whose input is generated output rather than an HTTP request; each framework supplies an adapter.
+
 
 | Method | What it checks | Runs when |
 |---|---|---|
@@ -27,7 +31,6 @@ a plain grep is wrong because manifest paths are cwd-relative.
 | `tests/interface/test_image_limit.py` | Endpoint accepts a request with 1000 image parts. | `K3_RUN_IMAGE_LIMIT=1`. Row 2's fixture already contains one 1000-image request. |
 | `tests/interface/test_observability.py` | Provider deploy-id header and trace correlation; metrics snapshot shape. | Live endpoint; snapshot test needs `KIMI_METRICS_SNAPSHOT`. |
 | `tests/interface/test_rate_limit.py` | Above-agreement TPM returns 429. | `K3_RUN_RATE_LIMIT=1` plus an explicit traffic budget; generates load on purpose. |
-| `tests/replay/test_openclaw.py` + `validations/run_openclaw_test.py` | OpenClaw tool-call fixture replay. | Was a K2.x requirement; not in the K3 matrix. |
 | `tests/streaming/test_stream_lifecycle_repro.py` | Stream lifecycle reproduction (unittest). | Diagnostic only. |
 | `validations/run_vendor_img_test.py`, `validations/eval_with_extra_headers.py` | Older standalone runners for image cases and Inspect evals with extra headers. | Superseded by the row 2 replay adapter and the inspect adapter. |
 

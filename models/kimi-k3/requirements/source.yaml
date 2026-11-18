@@ -87,12 +87,6 @@ beam_judge_contract:
   model: moonshotai/kimi-k2.7-code
   api_key_env: PPIO_JUDGE_API_KEY
   requests_per_minute: 500
-deepswe_runtime_contract:
-  host: build-server
-  root: /srv/kvh/deepswe
-  deep_swe_commit: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
-  pier_version: 0.3.1
-  tasks: 113
 fixture_lock:
   - name: vendor-img-testcases-inhouse-3.jsonl
     path: suites/novita-api/fixtures/vendor-img-testcases-inhouse-3.jsonl

@@ -646,7 +646,7 @@ def write_artifact_bundle(
         "  versions (dependency `evidence` paths are suite-directory relative and\n"
         "  copied under `artifacts/`).\n"
         "- `bundle.json` is the top-level inventory and completeness summary.\n"
-        "- Source paths are retained for build-server-side traceability.\n",
+        "- Source paths are retained for execution-host traceability.\n",
     )
     files.append(_generated_file_record(readme, Path("README.md"), kind="bundle"))
 

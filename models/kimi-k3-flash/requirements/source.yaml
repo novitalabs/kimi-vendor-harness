@@ -88,15 +88,6 @@ stream_spec_contract:
   sha256: 74edfb0d85a022714151c4da6600ba5adf472c243a3146d7a03b59f35e0b6a4e
   priorities: [P0, P1]
   uncovered_policy: default_pass
-deep_swe_runtime_contract:
-  host: build-server
-  root: /srv/kvh/deepswe
-  deep_swe_commit: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
-  pier_version: 0.3.1
-  tasks: 113
-  rounds: 3
-  score_threshold: 0.628
-  retry_policy: error_only
 fixture_lock:
   - name: vendor-img-testcases-inhouse-3.jsonl
     path: suites/novita-api/fixtures/vendor-img-testcases-inhouse-3.jsonl

@@ -4,6 +4,7 @@
 - Commit: `6ec0eaad1ca98933327cf571c0d8b78ab8476551` (also in `VENDORED_COMMIT`)
 - Why vendored: the upstream repository is private and team members do not have
   access. This snapshot is read-only; do not edit files here.
+- `docs/beam-1m-provenance.json` records the public BEAM source, converter, counts, and file hashes.
 - Omitted: `toolcall_benchmark/toolcall_thinking_samples.jsonl` and
   `toolcall_benchmark/toolcall_non_thinking_samples.jsonl` (LFS objects that were
   never fetched locally). No harness suite reads them; rows 7–9 use

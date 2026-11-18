@@ -329,7 +329,7 @@ def render_delivery_markdown(
         lines.extend(["## Optional / Pending Items", "", "| Item | Status | Note |", "|---|---|---|"])
         for item in pending:
             lines.append(f"| {item.get('item', '—')} | {item.get('status', '—')} | {item.get('note', '—')} |")
-    lines.extend(["", "## Evidence Policy", "", "Raw request/response evidence, logs, checkpoints, and large intermediate artifacts remain on the canonical build-server. The Mac package retains normalized suite summaries and a remote evidence index.", ""])
+    lines.extend(["", "## Evidence Policy", "", "Raw request/response evidence, logs, checkpoints, and large intermediate artifacts remain on the execution host. The Mac package retains normalized suite summaries and a remote evidence index.", ""])
     return "\n".join(lines)
 
 

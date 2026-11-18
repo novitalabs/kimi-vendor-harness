@@ -50,10 +50,18 @@ Other nvst commands pass through too, e.g.
 `scripts/kvh --base-url $URL --served-model $M -- resume --run runs/kimi-k3/<run-id>`.
 Use `--model kimi-k3` for K3 and K3.1; `kimi-k3-flash` for K3-Flash.
 
-On a laptop, `doctor` reports DeepSWE (row 17), BEAM judge (row 16) and Code
-Bench as blocked: they need a prepared Pier/Docker host (`/srv/kvh/...`, see
-[docs/deepswe.md](docs/deepswe.md)) or judge access. Rows 1–15 and 18 only need
-the endpoint.
+Rows 1–15 and 18 only need the endpoint. On a machine without extra setup, `doctor`
+reports DeepSWE (row 17), BEAM (row 16) and Code Bench as blocked:
+
+| Suite | Needs | Host setting (environment variable) |
+|---|---|---|
+| DeepSWE, row 17 | Pier and the deep-swe task corpus ([docs/deepswe.md](docs/deepswe.md)) | `NVST_DEEPSWE_ROOT`, `NVST_PIER_BIN` |
+| BEAM, row 16 | Judge access ([docs/credentials.md](docs/credentials.md)) | `--judge-access` file |
+| Code Bench | A runner host with Docker | `NVST_CODE_BENCH_HOST`, `NVST_CODE_BENCH_WORKDIR_ROOT`, `NVST_CODE_BENCH_CACHE_ROOT`, `NVST_CODE_BENCH_CONTAINER_PROXY` |
+
+Host settings say where a suite runs, not what it tests, so they are not part of the shared test-set
+definitions or the suite input hash. If your network needs a proxy to reach the endpoint or to download
+benchmark datasets, set `HTTP(S)_PROXY` in your own shell; suites inherit it.
 
 Results land in `runs/<model>/<run-id>/`: `acceptance.md` / `acceptance.json`
 for the verdict, per-suite directories for evidence, and `test-artifacts/` as a
@@ -78,6 +86,22 @@ shareable bundle. `uv run nvst list --model kimi-k3` shows every row and selecto
 Reading results: HTTP 429, timeouts and overload are `execution_invalid`
 (rerun, don't fix code). Rows 7–15 fail only when more than 2pp below the
 lowest official observation. Deterministic rows must pass 100%.
+
+## Framework-neutral parser vectors
+
+`suites/novita-api/tests/parse_contract_vectors.jsonl` is a parser contract derived from the
+`k3-flash-kvv` behaviour. It covers typed arguments, raw JSON byte preservation, marker text inside
+JSON strings, malformed-call isolation, undeclared-tool dropping, truncation, and attribute unescaping.
+It is not an endpoint test: a framework adapter receives token-decoder output as chunks and returns
+normalized reasoning/content/tool calls.
+
+```bash
+uv run python scripts/validate_parse_vectors.py
+uv run python scripts/run_parse_vectors.py --adapter 'python /path/to/framework_parser_adapter.py'
+```
+
+The adapter protocol and expected normalized result are documented in
+`scripts/run_parse_vectors.py`. Endpoint tests remain in `suites/novita-api/tests/toolcall_contract/`.
 
 ## Layout
 

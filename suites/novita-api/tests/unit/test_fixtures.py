@@ -9,11 +9,8 @@ def _records(name: str) -> list[dict]:
 
 def test_official_k3_fixture_counts_and_finish_reasons() -> None:
     image = _records("vendor-img-testcases-inhouse-3.jsonl")
-    openclaw = _records("9.openclaw_cases12.jsonl")
     assert len(image) == 25
-    assert len(openclaw) == 12
     assert {row["expected_finish_reason"] for row in image} == {"stop", "tool_calls"}
-    assert all(row["request"]["tools"] for row in openclaw)
 
 
 def test_official_image_fixture_covers_schema_and_message_roles() -> None:

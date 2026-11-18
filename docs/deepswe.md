@@ -8,7 +8,7 @@ Row 17 runs the public 113-task DeepSWE corpus through Pier with Kimi Code
 
 The committed profile fixes:
 
-- runtime root `/srv/kvh/deepswe`;
+- runtime root the path in `NVST_DEEPSWE_ROOT`;
 - deep-swe commit `435ee89ec2f2e2289f33b0da4f992f0b7b7266b9`;
 - Pier `0.3.1`;
 - 113 tasks;

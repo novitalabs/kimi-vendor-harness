@@ -425,7 +425,6 @@ def test_table_expected_results_match_runner_contracts() -> None:
         "kind": "count_only",
         "value": {"passed": 25, "skipped": 0},
     }
-    assert "openclaw" not in suites
     assert suites["image-test"].completeness["expected_max_images"] == 1000
     assert rows["3"]["official_result"]["value"] == {"passed": 18, "skipped": 0}
     assert rows["4"]["official_result"]["value"] == {"passed": 408, "skipped": 0}
@@ -550,7 +549,7 @@ def test_beam_declared_context_keeps_headroom_below_the_served_window() -> None:
 
 
 def test_beam_dataset_and_generation_contract_are_pinned() -> None:
-    root = ROOT / "suites/novita-api/resources/beam-1m"
+    root = ROOT / "vendor/kvv-k3/beam/data"
     questions = root / "beam_1m_questions.jsonl"
     chats = root / "beam_1m_chats.jsonl.gz"
     assert hashlib.sha256(questions.read_bytes()).hexdigest() == (

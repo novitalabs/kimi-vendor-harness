@@ -63,9 +63,7 @@ RPM; its credential is named by `PPIO_JUDGE_API_KEY`. Successful terminal empty
 vendor responses score zero, while endpoint and judge request errors remain
 execution-invalid. deepSWE verifies the local source commit, clean tracked worktree,
 Pier version, and 113-task inventory before staging or execution. It runs only
-on a host with the prepared DeepSWE runtime (`transport: local`). OpenClaw is
-no longer present in the K3 necessary-test table; its runner and response
-artifacts remain available as reusable diagnostics and imported-suite support.
+on a host with the prepared DeepSWE runtime (`transport: local`). The legacy K2.x replay suite is not part of the K3 test set.
 K3 full acceptance runs required precision rows 7..15 and 17; extended Kimi
 Code Bench and BEAM are optional explicit suites and are not automatically run.
 

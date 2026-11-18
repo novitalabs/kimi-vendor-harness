@@ -520,51 +520,12 @@ def test_replay_adapter_blocks_quota_even_after_partial_success(
     ctx = context(
         tmp_path,
         "replay",
-        {"kind": "openclaw", "fixture": "unused.jsonl", "failure_exit_is_valid": True},
+        {"kind": "image", "fixture": "unused.jsonl", "failure_exit_is_valid": True},
     )
     result = adapter_for("replay", runner=ReplayQuotaRunner()).run(ctx)
     assert result.status == "blocked"
     assert result.validity == "service_invalid"
     assert result.reason == "quota_exhausted"
-
-
-def test_openclaw_response_artifacts_preserve_failure_body_and_redact_key(tmp_path: Path) -> None:
-    response = httpx.Response(
-        400,
-        headers={
-            "Content-Type": "application/json",
-            "X-Request-Id": "request-1",
-            "Set-Cookie": "must-not-persist",
-        },
-        content=b'{"error":"bad request","echo":"runtime-only-secret"}',
-    )
-    paths = write_response_artifacts(
-        tmp_path,
-        group="openclaw-responses",
-        case_id="line-10",
-        response=response,
-        api_key="runtime-only-secret",
-    )
-
-    body = (tmp_path / "openclaw-responses/line-10/response.body").read_text()
-    headers = json.loads(
-        (tmp_path / "openclaw-responses/line-10/response.headers.json").read_text()
-    )
-    metadata = json.loads(
-        (tmp_path / "openclaw-responses/line-10/response.meta.json").read_text()
-    )
-    assert "runtime-only-secret" not in body
-    assert "[REDACTED]" in body
-    assert headers == {
-        "content-type": "application/json",
-        "x-request-id": "request-1",
-    }
-    assert metadata["status_code"] == 400
-    assert {path.name for path in paths} == {
-        "response.body",
-        "response.headers.json",
-        "response.meta.json",
-    }
 
 
 def test_pytest_adapter_collects_declared_artifact_globs(tmp_path: Path, monkeypatch) -> None:
@@ -573,11 +534,11 @@ def test_pytest_adapter_collects_declared_artifact_globs(tmp_path: Path, monkeyp
     class ArtifactRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
             artifact_dir = Path(artifact_dir_arg(command))
-            response_dir = artifact_dir / "openclaw-responses" / "line-10"
+            response_dir = artifact_dir / "response-artifacts" / "line-10"
             response_dir.mkdir(parents=True)
             (response_dir / "response.body").write_text("failure body", encoding="utf-8")
             (artifact_dir / "cases.jsonl").write_text(
-                '{"nodeid":"test_openclaw.py::test_case","outcome":"failed","phase":"call"}\n',
+                '{"nodeid":"test_replay.py::test_case","outcome":"failed","phase":"call"}\n',
                 encoding="utf-8",
             )
             return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
@@ -589,11 +550,11 @@ def test_pytest_adapter_collects_declared_artifact_globs(tmp_path: Path, monkeyp
             "python": "python3",
             "paths": ["tests/example"],
             "artifact_plugin": "plugin",
-            "artifact_globs": ["openclaw-responses/*/response.body"],
+            "artifact_globs": ["response-artifacts/*/response.body"],
         },
     )
     result = adapter_for("novita_api", runner=ArtifactRunner()).run(ctx)
-    assert any(path.endswith("openclaw-responses/line-10/response.body") for path in result.artifact_paths)
+    assert any(path.endswith("response-artifacts/line-10/response.body") for path in result.artifact_paths)
 
 
 def test_pytest_setup_failure_is_execution_invalid(tmp_path: Path, monkeypatch) -> None:
@@ -1733,7 +1694,9 @@ def test_inspect_adapter_rejects_exhausted_engine_overload_error(
     ]
 
 
-def test_code_bench_finalize_only_repairs_crashed_finalize(tmp_path: Path) -> None:
+def test_code_bench_finalize_only_repairs_crashed_finalize(tmp_path: Path, monkeypatch) -> None:
+    for key, value in {"NVST_CODE_BENCH_HOST": "host.test", "NVST_CODE_BENCH_WORKDIR_ROOT": "/tmp/kbench", "NVST_CODE_BENCH_CACHE_ROOT": "/tmp/.kbench-cache", "NVST_CODE_BENCH_CONTAINER_PROXY": "http://proxy.test:1080", "NVST_DEEPSWE_ROOT": "/srv/kvh/deepswe", "NVST_PIER_BIN": "/srv/kvh/venvs/pier/bin/pier"}.items():
+        monkeypatch.setenv(key, value)
     product_root = Path(__file__).resolve().parents[2]
     ctx = context(tmp_path, "code_bench", {"run_contract": "contract.json"})
     ctx = replace(ctx, repository_root=product_root)
@@ -1751,7 +1714,9 @@ def test_code_bench_finalize_only_repairs_crashed_finalize(tmp_path: Path) -> No
     assert contract == str(ctx.suite_dir / "code-bench-run-contract.json")
 
 
-def test_code_bench_and_deepswe_commands_use_owned_wrappers(tmp_path: Path) -> None:
+def test_code_bench_and_deepswe_commands_use_owned_wrappers(tmp_path: Path, monkeypatch) -> None:
+    for key, value in {"NVST_CODE_BENCH_HOST": "host.test", "NVST_CODE_BENCH_WORKDIR_ROOT": "/tmp/kbench", "NVST_CODE_BENCH_CACHE_ROOT": "/tmp/.kbench-cache", "NVST_CODE_BENCH_CONTAINER_PROXY": "http://proxy.test:1080", "NVST_DEEPSWE_ROOT": "/srv/kvh/deepswe", "NVST_PIER_BIN": "/srv/kvh/venvs/pier/bin/pier"}.items():
+        monkeypatch.setenv(key, value)
     code = context(
         tmp_path,
         "code_bench",
@@ -1877,7 +1842,7 @@ def test_deepswe_command_requires_one_retry(tmp_path: Path) -> None:
 
 def test_deepswe_command_rejects_missing_runtime_pins(tmp_path: Path) -> None:
     deep = context(tmp_path, "deepswe", {})
-    with pytest.raises(ConfigError, match="runtime_root"):
+    with pytest.raises(ConfigError, match="NVST_DEEPSWE_ROOT"):
         adapter_for("deepswe", runner=FakeRunner()).build_command(deep)
 
 
@@ -2604,13 +2569,23 @@ def test_beam_generation_only_writes_pending_checkpoint_without_judging(
     monkeypatch.setenv("KIMI_API_KEY", "vendor-secret")
     monkeypatch.setenv("KIMI_MODEL", "vendor-model")
     monkeypatch.setenv("KIMI_BASE_URL", "https://vendor.test/v1")
+    kvv_root = tmp_path / "kvv"
+    data = kvv_root / "beam" / "data"
+    data.mkdir(parents=True)
+    import gzip
+    with gzip.open(data / "beam_1m_chats.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"chat_id": "1", "messages": []}) + "\n")
+    (data / "beam_1m_questions.jsonl").write_text(
+        json.dumps({"chat_id": "1", "question_type": "abstention", "question_index": 0}) + "\n",
+        encoding="utf-8",
+    )
 
     output = tmp_path / "beam"
     assert beam_main(
         [
             "--output-dir", str(output),
             "--python", "python3",
-            "--kvv-root", str(tmp_path / "kvv"),
+            "--kvv-root", str(kvv_root),
             "--expected-trials", "1",
             "--max-context-tokens", "1048064",
             "--generation-only",
@@ -2806,6 +2781,16 @@ def test_beam_runner_blocks_quota_without_judging(tmp_path: Path, monkeypatch) -
     monkeypatch.setenv("KIMI_API_KEY", "vendor-secret")
     monkeypatch.setenv("KIMI_MODEL", "vendor-model")
     monkeypatch.setenv("KIMI_BASE_URL", "https://vendor.test/v1")
+    kvv_root = tmp_path / "kvv"
+    data = kvv_root / "beam" / "data"
+    data.mkdir(parents=True)
+    import gzip
+    with gzip.open(data / "beam_1m_chats.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"chat_id": "1", "messages": []}) + "\n")
+    (data / "beam_1m_questions.jsonl").write_text(
+        json.dumps({"chat_id": "1", "question_type": "abstention", "question_index": 0}) + "\n",
+        encoding="utf-8",
+    )
     output = tmp_path / "beam"
     assert beam_main(
         [
@@ -2846,12 +2831,22 @@ def test_beam_runner_rejects_invalid_generations_before_judging(
     monkeypatch.setenv("KIMI_API_KEY", "vendor-secret")
     monkeypatch.setenv("KIMI_MODEL", "vendor-model")
     monkeypatch.setenv("KIMI_BASE_URL", "https://vendor.test/v1")
+    kvv_root = tmp_path / "kvv"
+    data = kvv_root / "beam" / "data"
+    data.mkdir(parents=True)
+    import gzip
+    with gzip.open(data / "beam_1m_chats.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"chat_id": "1", "messages": []}) + "\n")
+    (data / "beam_1m_questions.jsonl").write_text(
+        json.dumps({"chat_id": "1", "question_type": "abstention", "question_index": 0}) + "\n",
+        encoding="utf-8",
+    )
     output = tmp_path / "beam"
     assert beam_main(
         [
             "--output-dir", str(output),
             "--python", "python3",
-            "--kvv-root", str(tmp_path / "kvv"),
+            "--kvv-root", str(kvv_root),
             "--expected-trials", "1",
             "--max-context-tokens", "1048064",
         ]
@@ -2866,3 +2861,17 @@ def test_beam_runner_rejects_invalid_generations_before_judging(
     assert result["coverage"]["task_retry_attempts"]["1|abstention|0"] == 3
     assert result["coverage"]["invalid_generation_keys"] == ["1:abstention:0"]
     assert not any("beam_judge_run" in command for command in commands)
+
+
+def test_host_settings_override_runtime_locations(tmp_path: Path, monkeypatch) -> None:
+    """Where DeepSWE and Code Bench run is a property of the host, not of the shared test set."""
+    monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
+    deep = context(tmp_path, "deepswe", dict(DEEPSWE_PINS))
+    default = adapter_for("deepswe", runner=FakeRunner()).build_command(deep)
+    assert default[default.index("--runtime-root") + 1] == DEEPSWE_PINS["runtime_root"]
+
+    monkeypatch.setenv("NVST_DEEPSWE_ROOT", "/data/deepswe")
+    monkeypatch.setenv("NVST_PIER_BIN", "/opt/pier/bin/pier")
+    command = adapter_for("deepswe", runner=FakeRunner()).build_command(deep)
+    assert command[command.index("--runtime-root") + 1] == "/data/deepswe"
+    assert command[command.index("--pier-bin") + 1] == "/opt/pier/bin/pier"

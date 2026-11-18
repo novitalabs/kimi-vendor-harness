@@ -115,3 +115,7 @@ external runtime versions such as Harbor/Terminal Bench 2/Kimi CLI/uv for Code
 Bench and Pier/DeepSWE/Kimi Code for row 17).
 The bundle keeps required rows and optional BEAM/Code Bench results separate;
 optional suites never change the required row count or default acceptance verdict.
+
+The optional BEAM fixture is sourced from the vendored `vendor/kvv-k3/beam/data/` snapshot. Its public
+source, converter, counts, and file hashes are recorded in `docs/beam-1m-provenance.json`; the old
+second copy under `suites/novita-api/resources/` is intentionally not retained.

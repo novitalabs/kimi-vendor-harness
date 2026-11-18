@@ -457,13 +457,8 @@ def main(argv: list[str] | None = None) -> int:
         if not answers.is_file():
             raise RuntimeError(f"BEAM answers file does not exist: {answers}")
     else:
-        fallback = (
-            Path(__file__).resolve().parents[3]
-            / "suites"
-            / "novita-api"
-            / "resources"
-            / "beam-1m"
-        )
+        # The official BEAM 1M data shipped with kvv-k3 (the --kvv-root checkout).
+        fallback = args.kvv_root / "beam" / "data"
         invoke(
             [
                 args.python,

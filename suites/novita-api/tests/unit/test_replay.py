@@ -13,11 +13,8 @@ def test_replay_response_headers_are_allowlisted() -> None:
 def test_fixture_loader_preserves_official_case_counts() -> None:
     root = Path(__file__).parents[2] / "fixtures"
     image = load_records("image", root / "vendor-img-testcases-inhouse-3.jsonl")
-    openclaw = load_records("openclaw", root / "9.openclaw_cases12.jsonl")
     assert len(image) == 25
-    assert len(openclaw) == 12
     assert request_for("image", image[0], "kimi-k3")["model"] == "kimi-k3"
-    assert request_for("openclaw", openclaw[0], "kimi-k3")["model"] == "kimi-k3"
 
 
 def test_replay_parser_handles_json_and_sse() -> None:

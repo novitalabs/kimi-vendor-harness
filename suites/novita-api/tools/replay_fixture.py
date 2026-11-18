@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay the official K3 image or OpenClaw JSONL fixture.
+"""Replay the official K3 image JSONL fixture.
 
 Only the model field is substituted. Authorization is sent from the environment
 and never written to an artifact. The runner accepts both JSON and SSE replies
@@ -26,7 +26,7 @@ except ImportError:  # direct `python tools/replay_fixture.py` invocation
     from reporting import run_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_COUNTS = {"image": 25, "openclaw": 12}
+EXPECTED_COUNTS = {"image": 25}
 SAFE_RESPONSE_HEADERS = {
     "content-type", "date", "server", "x-request-id", "x-trace-id",
     "traceparent", "x-msh-providerdeployid", "x-msh-usage-prompt-tokens",
@@ -56,13 +56,12 @@ def load_records(kind: str, path: Path) -> list[dict[str, Any]]:
                 raise ValueError(f"image record {index} lacks transformed_request")
             if record.get("expected_finish_reason") not in {"stop", "tool_calls"}:
                 raise ValueError(f"image record {index} has invalid expected finish reason")
-        elif not isinstance(record.get("request"), dict):
-            raise ValueError(f"openclaw record {index} lacks request")
+
     return records
 
 
 def request_for(kind: str, record: dict[str, Any], model: str) -> dict[str, Any]:
-    source = record["transformed_request"] if kind == "image" else record["request"]
+    source = record["transformed_request"]
     payload = json.loads(json.dumps(source))
     payload["model"] = model
     return payload
@@ -143,7 +142,7 @@ def error_summary(payload: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def run_case(kind: str, index: int, record: dict[str, Any], args: argparse.Namespace, headers: dict[str, str], root: Path) -> dict[str, Any]:
     payload = request_for(kind, record, args.model)
-    case_id = str(record.get("line", index)) if kind == "openclaw" else f"image-{index:04d}"
+    case_id = f"image-{index:04d}"
     case_dir = root / f"{index:04d}-{case_id}"
     case_dir.mkdir(parents=True)
     (case_dir / "request.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -180,7 +179,7 @@ def run_case(kind: str, index: int, record: dict[str, Any], args: argparse.Names
     message = choice.get("message") or {}
     finish_reason = choice.get("finish_reason") or observation.get("finish_reason")
     tool_calls = message.get("tool_calls") or observation.get("tool_calls") or []
-    expected = record.get("expected_finish_reason") if kind == "image" else "tool_calls"
+    expected = record.get("expected_finish_reason")
     passed = status == 200 and finish_reason == expected and transport_error is None
     result = {
         "case": case_id,
@@ -207,7 +206,7 @@ def run_case(kind: str, index: int, record: dict[str, Any], args: argparse.Names
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=sorted(EXPECTED_COUNTS))
+    parser.add_argument("kind", choices=["image"])
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--base-url", default=os.environ.get("KIMI_BASE_URL"), required=False)
     parser.add_argument("--api-key", default=os.environ.get("KIMI_API_KEY", ""))
@@ -259,7 +258,7 @@ def main() -> int:
         "passed": passed,
         "failed": len(indexed_records) - passed,
         "total": len(indexed_records),
-        "finish_reason_contract": "image fixture expected per-record; OpenClaw expected tool_calls",
+        "finish_reason_contract": "image fixture expected per-record",
         "ended_at": utc_now(),
     }
     (args.output_dir / "summary.jsonl").write_text("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in results), encoding="utf-8")

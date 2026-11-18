@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ..artifacts import SuiteResult, enforce_completeness, utc_now, write_json
-from ..config import ConfigError
+from ..config import ConfigError, required_host_setting
 from ..stability import (
     CREDENTIAL_INVALID,
     failure_class_counts,
@@ -922,10 +922,10 @@ class ReplayAdapter(CommandAdapter):
 
     def build_command(self, context: AdapterContext) -> list[str]:
         kind = str(context.suite.config.get("kind") or "")
-        if kind not in {"image", "openclaw"}:
+        if kind != "image":
             raise ConfigError(
                 "runner_contract_invalid",
-                f"{context.suite.suite_id} requires config.kind image or openclaw",
+                f"{context.suite.suite_id} requires config.kind image",
             )
         fixture_value = context.suite.config.get("fixture")
         if not isinstance(fixture_value, str) or not fixture_value:
@@ -1127,11 +1127,18 @@ class ReplayAdapter(CommandAdapter):
             fixture = Path(str(context.suite.config["fixture"]))
             if not fixture.is_absolute():
                 fixture = context.repository_root / fixture
-            records = [
-                json.loads(line)
-                for line in fixture.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
+            try:
+                records = [
+                    json.loads(line)
+                    for line in fixture.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+            except (OSError, json.JSONDecodeError) as exc:
+                result.status = "failed"
+                result.validity = "execution_invalid"
+                result.reason = "runner_contract_invalid"
+                result.failure_summary = f"invalid image fixture: {exc}"
+                return result
             image_counts = []
             for record in records:
                 count = 0
@@ -1529,7 +1536,13 @@ class CodeBenchAdapter(CommandAdapter):
             / "examples"
             / "run-contract.example.json"
         )
-        contract = json.loads(source.read_text(encoding="utf-8"))
+        try:
+            contract = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ConfigError(
+                "runner_contract_invalid",
+                f"cannot load Code Bench contract example: {exc}",
+            ) from exc
         count = 15 if mode == "smoke" else 89
         tag = context.run_dir.name.lower()
         evidence_dir = str(context.suite_dir.resolve())
@@ -1570,17 +1583,17 @@ class CodeBenchAdapter(CommandAdapter):
         }
         remote = context.suite.config.get("remote") or {}
         contract["remote"] = {
-            "host": str(remote.get("host", "build-server")),
+            "host": required_host_setting("host", remote.get("host")),
             "port": int(remote.get("port", 22)),
             "workdir": str(
-                remote.get("workdir_root", "/srv/kvh/kbench-runs")
+                required_host_setting("workdir_root", remote.get("workdir_root"))
             ).rstrip("/")
             + f"/{tag}",
             "container_proxy": str(
-                remote.get("container_proxy", "http://172.17.0.1:1081")
+                required_host_setting("container_proxy", remote.get("container_proxy"))
             ),
             "runtime_cache_root": str(
-                remote.get("runtime_cache_root", "/srv/kvh/.kbench-cache")
+                required_host_setting("runtime_cache_root", remote.get("runtime_cache_root"))
             ),
         }
         path = context.suite_dir / "code-bench-run-contract.json"
@@ -1966,7 +1979,7 @@ class DeepSWEAdapter(CommandAdapter):
         if transport != "local":
             raise ConfigError(
                 "runner_contract_invalid",
-                f"{context.suite.suite_id} requires local transport on build-server",
+                f"{context.suite.suite_id} requires local transport on the prepared execution host",
             )
         command = [
             sys.executable,
@@ -1991,6 +2004,8 @@ class DeepSWEAdapter(CommandAdapter):
             ("kimi_code_version", "--kimi-code-version"),
         ):
             value = context.suite.config.get(key)
+            if key in ("runtime_root", "pier_bin"):
+                value = required_host_setting(key, value)
             if value is None:
                 raise ConfigError(
                     "runner_contract_invalid",

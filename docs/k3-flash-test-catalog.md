@@ -60,7 +60,7 @@ the pinned commit and its LFS objects must be materialized before `doctor` or
 Row 10 reuses the existing Novita DeepSWE adapter and runtime contract:
 
 - prepared DeepSWE host, local transport;
-- `/srv/kvh/deepswe`;
+- the path in `NVST_DEEPSWE_ROOT`;
 - DeepSWE commit `435ee89ec2f2e2289f33b0da4f992f0b7b7266b9`;
 - Pier `0.3.1`;
 - 113 tasks and three rounds;
