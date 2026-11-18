@@ -37,7 +37,7 @@ _TIMEOUT_RE = re.compile(
 )
 _CONNECTION_RE = re.compile(
     r"(?i)ConnectError|APIConnectionError|RemoteProtocolError|Connection reset|"
-    r"Connection refused|Name or service not known|Temporary failure in name resolution|"
+    r"Connection refused|Connection error|Name or service not known|Temporary failure in name resolution|"
     r"nodename nor servname|certificate verify failed|Network is unreachable"
 )
 

@@ -59,6 +59,25 @@ def _resolve_cwd(context: AdapterContext) -> Path:
     return candidate.resolve()
 
 
+def _rerun_selectors(context: AdapterContext, nodeids: list[str]) -> tuple[str, ...]:
+    """Turn recorded pytest node ids into arguments that select them again from the suite's cwd.
+
+    Recorded node ids are relative to pytest's rootdir (the repository root), but suites may run
+    from a sub-directory (e.g. ``vendor/kvv-k3``). Passed unchanged, such ids collect nothing and
+    every rerun wave silently runs zero tests.
+    """
+    cwd = _resolve_cwd(context)
+    root = context.repository_root.resolve()
+    selectors = []
+    for nodeid in nodeids:
+        path, sep, rest = nodeid.partition("::")
+        absolute = (root / path).resolve()
+        if absolute.is_relative_to(cwd):
+            path = absolute.relative_to(cwd).as_posix()
+        selectors.append(path + sep + rest)
+    return tuple(selectors)
+
+
 def _runner_fingerprint(context: AdapterContext) -> dict[str, str]:
     raw = context.suite.config.get("runner_fingerprint") or {}
     return {str(key): str(value) for key, value in raw.items()}
@@ -279,6 +298,21 @@ class CommandAdapter(Adapter):
         )
 
 
+def _pytest_failure_text(record: dict[str, Any]) -> str:
+    """Text used to classify one pytest failure as retryable, service-invalid, or a real failure.
+
+    Only pytest's exception lines (``E   ...``) of ``longrepr`` count: ``longrepr`` also prints the
+    failing function's source, and an ``except (openai.APITimeoutError, ...)`` clause there must not
+    turn an assertion failure into a retryable timeout. A ``longrepr`` without exception lines is
+    used whole. Captured runtime output (``caplog``, ``sections``) is kept as-is.
+    """
+    longrepr = str(record.get("longrepr") or "")
+    error_lines = [line for line in longrepr.splitlines() if line.startswith("E ")]
+    parts = ["\n".join(error_lines) if error_lines else longrepr]
+    parts.extend(str(record.get(key) or "") for key in ("caplog", "sections"))
+    return "\n".join(parts)
+
+
 class PytestAdapter(CommandAdapter):
     def build_command(self, context: AdapterContext) -> list[str]:
         executable = _format_tokens(
@@ -338,10 +372,7 @@ class PytestAdapter(CommandAdapter):
                 normalized = "error" if outcome == "failed" and phase != "call" else outcome
                 final_by_nodeid[nodeid] = (normalized, str(phase or "call"))
                 if outcome == "failed":
-                    failure_by_nodeid[nodeid] = "\n".join(
-                        str(record.get(key) or "")
-                        for key in ("longrepr", "caplog", "sections")
-                    )
+                    failure_by_nodeid[nodeid] = _pytest_failure_text(record)
         counts = {name: 0 for name in ("total", "passed", "failed", "skipped", "error")}
         for outcome, _ in final_by_nodeid.values():
             counts["total"] += 1
@@ -547,7 +578,7 @@ class PytestAdapter(CommandAdapter):
             for index in round_indexes:
                 prior = (previous or {}).get(index)
                 rerun_cases = list((prior.coverage if prior else {}).get("rerun_cases") or [])
-                selector_args = tuple(rerun_cases) if rerun_cases else context.selector_args
+                selector_args = _rerun_selectors(context, rerun_cases) if rerun_cases else context.selector_args
                 name = "formal" if wave == 0 else f"rerun-{wave:02d}"
                 attempt_context = replace(
                     context,
@@ -729,7 +760,7 @@ class PytestAdapter(CommandAdapter):
                 retry_context = replace(
                     context,
                     suite_dir=context.suite_dir / f"rerun-{wave:02d}",
-                    selector_args=tuple(rerun_cases) if rerun_cases else context.selector_args,
+                    selector_args=_rerun_selectors(context, rerun_cases) if rerun_cases else context.selector_args,
                 )
                 retry = self._run_once(retry_context, {})
                 result = self._merge_case_rerun(result, retry, policy)

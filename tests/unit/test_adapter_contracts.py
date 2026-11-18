@@ -727,6 +727,63 @@ def test_pytest_partial_timeout_requires_batch_rerun(
     assert result.reason == "retryable_case_failure"
 
 
+# Real pytest longrepr shape: it prints the failing function's source ("> " / indented lines),
+# then the exception ("E " lines). Only the exception lines decide retryability.
+_SOURCE_WITH_EXCEPT = (
+    "    def test_case(client):\n"
+    "        try:\n"
+    "            stream = client.chat.completions.create(**kwargs)\n"
+    "        except (\n"
+    "            openai.APIConnectionError,\n"
+    "            openai.APITimeoutError,\n"
+    "        ) as exc:\n"
+    "            pytest.fail(f'infrastructure/API error: {exc}')\n"
+)
+
+
+@pytest.mark.parametrize(
+    "error_lines,expected",
+    [
+        (
+            "E       AssertionError: prompt_tokens mismatch\n"
+            "E       assert False\n"
+            "E        +  where False = _prompt_tokens_are_acceptable(expected=99, actual=12)",
+            ("failed", "valid", None),
+        ),
+        (
+            "E           Failed: infrastructure/API error for case k3_vision: Connection error.",
+            ("failed", "execution_invalid", "retryable_case_failure"),
+        ),
+    ],
+    ids=["assertion-is-real-failure", "infra-error-is-retryable"],
+)
+def test_pytest_classifies_exception_lines_not_test_source(
+    tmp_path: Path, monkeypatch, error_lines: str, expected: tuple
+) -> None:
+    monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
+
+    class SourceInLongreprRunner(FakeRunner):
+        def run(self, command, *, cwd, env, timeout):
+            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            record = {
+                "nodeid": "tests/example.py::test_case",
+                "outcome": "failed",
+                "phase": "call",
+                "longrepr": _SOURCE_WITH_EXCEPT + error_lines,
+            }
+            (artifact_dir / "cases.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
+
+    ctx = context(
+        tmp_path,
+        "kvv",
+        {"python": "python3", "paths": ["tests/example"], "artifact_plugin": "plugin"},
+    )
+    result = adapter_for("kvv", runner=SourceInLongreprRunner()).run(ctx)
+    assert (result.status, result.validity, result.reason) == expected
+
+
 def test_pytest_batch_rerun_recovers_only_retryable_case(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -839,6 +896,90 @@ def test_pytest_any_pass_reruns_explicit_failure(tmp_path: Path, monkeypatch) ->
     assert result.counts["passed"] == 1
     assert result.coverage["rerun_recovered_cases"] == 1
     assert runner.calls == 2
+
+
+@pytest.mark.parametrize(
+    "longrepr,expected",
+    [
+        ("E       AssertionError: behavior mismatch", ("failed", "valid")),
+        ("E       httpx.ReadTimeout: The read operation timed out", ("failed", "execution_invalid")),
+    ],
+    ids=["persistent-model-failure-is-a-valid-fail", "persistent-timeout-is-invalid"],
+)
+def test_pytest_any_pass_exhausted_reruns_keep_failure_class(
+    tmp_path: Path, monkeypatch, longrepr: str, expected: tuple
+) -> None:
+    """any_pass reruns every failure, but exhausting the reruns must not turn a deterministic model
+    failure into execution_invalid; only stability failures stay invalid."""
+    monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
+
+    class AlwaysFailRunner(FakeRunner):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(self, command, *, cwd, env, timeout):
+            self.calls += 1
+            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            record = {"nodeid": "tests/example.py::test_behavior", "outcome": "failed", "phase": "call",
+                      "longrepr": longrepr}
+            (artifact_dir / "cases.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
+
+    runner = AlwaysFailRunner()
+    ctx = context(
+        tmp_path,
+        "kvv",
+        {
+            "python": "python3",
+            "paths": ["tests/example"],
+            "artifact_plugin": "plugin",
+            "rerun_policy": {"mode": "any_pass", "max_reruns": 3, "scheduling": "batch_after_formal"},
+        },
+    )
+    result = adapter_for("kvv", runner=runner).run(ctx)
+    assert runner.calls == 4  # formal + 3 reruns, for both failure classes
+    assert (result.status, result.validity) == expected
+
+
+def test_pytest_rerun_selects_nodeids_relative_to_suite_cwd(tmp_path: Path, monkeypatch) -> None:
+    """Recorded node ids are rootdir-relative; a suite running from a sub-directory must get them
+    rewritten relative to its cwd, otherwise each rerun collects zero tests."""
+    monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
+    (tmp_path / "vendor/kvv/tests").mkdir(parents=True)
+    nodeid = "vendor/kvv/tests/test_x.py::test_case[a]"
+
+    class Runner(FakeRunner):
+        def __init__(self) -> None:
+            self.commands = []
+
+        def run(self, command, *, cwd, env, timeout):
+            self.commands.append(command)
+            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            outcome = "failed" if len(self.commands) == 1 else "passed"
+            record = {"nodeid": nodeid, "outcome": outcome, "phase": "call",
+                      "longrepr": "E   AssertionError: mismatch" if outcome == "failed" else ""}
+            (artifact_dir / "cases.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 1 if outcome == "failed" else 0, stdout="", stderr="")
+
+    runner = Runner()
+    ctx = context(
+        tmp_path,
+        "kvv",
+        {
+            "python": "python3",
+            "cwd": "vendor/kvv",
+            "paths": ["tests"],
+            "artifact_plugin": "plugin",
+            "rerun_policy": {"mode": "any_pass", "max_reruns": 3, "scheduling": "batch_after_formal"},
+        },
+    )
+    result = adapter_for("kvv", runner=runner).run(ctx)
+    assert len(runner.commands) == 2
+    assert "tests/test_x.py::test_case[a]" in runner.commands[1]
+    assert nodeid not in runner.commands[1]
+    assert (result.status, result.validity) == ("passed", "valid")
 
 
 def test_pytest_adapter_repeats_and_aggregates_independent_artifacts(

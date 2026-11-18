@@ -64,10 +64,16 @@ manifest selector, which was checked, but the full path has not been run end to 
 against a live endpoint yet. A row marked `wired` has a declared suite; it has not
 necessarily run on this host.
 
-## Known limitation: fake-endpoint runs of row 6
+## Fake-endpoint run of row 6 (resolved)
 
-`develop --select 6` against the in-repo fake (`tests/support/fake_k3_server.py`) ends
-`inconclusive` with `rerun_exhausted_invalid`. The cause is not established. Ruled out by direct
-test: the fake's listen backlog and concurrency (148/148 OK at 74 workers, streaming and non-streaming),
-and request body size (largest case about 1.9 KB). The fake is a harness check only; this result says
-nothing about any real endpoint.
+`develop --select 6` against `tests/support/fake_k3_server.py` now ends `failed` (valid) with every
+prompt-token case reported as a real mismatch, which is correct: the fake does not render K3 prompts.
+Earlier runs ended `inconclusive` because of three harness bugs, all fixed with regression tests:
+
+1. The fake crashed on list-shaped message content (vision cases), surfacing as `Connection error.`
+2. Failure classification read pytest's whole `longrepr`, which includes the test's source; an
+   `except (openai.APITimeoutError, ...)` clause there made every assertion failure look retryable.
+   Only the `E ` exception lines are classified now.
+3. Rerun waves passed rootdir-relative node ids (`vendor/kvv-k3/tests/...`) to a pytest process
+   running in `vendor/kvv-k3`, so each rerun collected zero tests. Node ids are now rewritten
+   relative to the suite's cwd. This affected rows 3 and 6 for both kimi-k3 and kimi-k3-flash.

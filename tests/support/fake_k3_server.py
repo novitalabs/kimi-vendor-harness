@@ -41,11 +41,20 @@ def count_text(text: str, special: bool) -> int:
     return len(TOKEN_RE.findall(text)) + extra
 
 
+def content_text(content: Any) -> str:
+    """Flatten OpenAI message content (a string or a list of parts) to its text parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(p.get("text") or "" for p in content if isinstance(p, dict) and p.get("type") == "text")
+    return ""
+
+
 def prompt_tokens(req: dict[str, Any], faults: set[str]) -> int:
     special = "marker_special" in faults
     total = 3
     for message in req.get("messages") or []:
-        total += count_text(message.get("content") or "", special)
+        total += count_text(content_text(message.get("content")), special)
         for call in message.get("tool_calls") or []:
             total += count_text(json.dumps(call.get("function") or {}, ensure_ascii=False), special)
     if req.get("tools"):
@@ -102,7 +111,7 @@ def compose(req: dict[str, Any], faults: set[str]) -> dict[str, Any]:
     tools = req.get("tools") or []
     choice = req.get("tool_choice") or "auto"
     messages = req.get("messages") or []
-    last_user = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+    last_user = next((content_text(m.get("content")) for m in reversed(messages) if m.get("role") == "user"), "")
     result: dict[str, Any] = {"content": "", "reasoning": "思考中" if thinking_on(req) else "", "calls": []}
 
     wants_call = bool(tools) and choice != "none" and (choice == "required" or "天气" in last_user or "write_file" in last_user)
