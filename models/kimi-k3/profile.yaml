@@ -20,6 +20,7 @@ requirements:
     commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
     checkout: vendor/kvv-k3
     git_lfs_required: true
+suite_catalog: suites/k3-family.yaml
 execution:
   row_order: exact
 acceptance_control:

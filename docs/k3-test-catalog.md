@@ -2,7 +2,7 @@
 
 This catalog defines the two execution classes for the K3 vendor matrix. The
 executable source remains `models/kimi-k3/profile.yaml` and
-`models/kimi-k3/suite-manifest.yaml`; this document explains the contract and
+`models/kimi-k3/suite-manifest.yaml` (composed with the shared `suites/k3-family.yaml`); this document explains the contract and
 operator intent without creating a second matrix.
 
 ## Classification

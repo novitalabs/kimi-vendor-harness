@@ -24,6 +24,7 @@ requirements:
   closed_tests:
     - kimi-code-bench
     - stress-test
+suite_catalog: suites/k3-family.yaml
 execution:
   row_order: exact
 acceptance_control:

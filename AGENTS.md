@@ -5,9 +5,13 @@ adapters, diagnosis, reporting, Novita API tests, the Code Bench suite, and the
 DeepSWE adapter. Official Moonshot verifiers live under `vendor/` and are
 read-only.
 
-- Treat `models/<model>/profile.yaml`, `requirements/`, and
-  `suite-manifest.yaml` as the only executable matrix. Do not branch on model
-  names in Python to recreate profile policy.
+- Treat `models/<model>/profile.yaml`, `requirements/`, `suite-manifest.yaml`, and the
+  shared K3-family test sets in `suites/k3-family.yaml` as the only executable matrix.
+  A test set used by every K3-family model is defined once in `suites/k3-family.yaml`;
+  a model manifest only names the sets it runs (`use`), its official rows and selectors,
+  and the values where that model differs (thresholds, budgets). Changing a shared set
+  changes it for every model. Do not branch on model names in Python to recreate
+  profile policy.
 - `kimi-k3-flash` is a separate profile under `models/kimi-k3-flash/`. It is
   pinned to Moonshot's K3-flash document revision 122, uses only its committed
   local rows, and reuses the DeepSWE adapter.

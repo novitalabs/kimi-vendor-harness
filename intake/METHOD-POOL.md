@@ -1,7 +1,7 @@
 # Method pool: test methods in this repository that no model manifest runs
 
 When an official intake item has `coverage: gap`, look here first. Each entry is a runnable method
-that exists but is not wired into `models/kimi-k3*/suite-manifest.yaml`. Wiring one in changes an
+that exists but is not wired into any model (`suites/k3-family.yaml` + `models/*/suite-manifest.yaml`). Wiring one in changes an
 acceptance matrix, so it is a reviewed change, never automatic.
 
 Regenerate the "used vs unused" split by resolving every manifest suite's `paths`, `fixture`,

@@ -7,7 +7,8 @@ models/kimi-k3-flash/
   profile.yaml
   requirements/rows.yaml
   requirements/source.yaml
-  suite-manifest.yaml
+  suite-manifest.yaml      # rows, selectors, and Flash-specific values
+suites/k3-family.yaml      # shared K3-family test-set definitions
 ```
 
 The source of truth is Moonshot's K3 Flash vendor document at

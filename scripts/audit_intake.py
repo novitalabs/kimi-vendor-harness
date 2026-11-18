@@ -1,10 +1,10 @@
 """Audit an official-test intake against the model manifest.
 
 Usage:
-    uv run python scripts/audit_intake.py intake/<model>/<revision> [--manifest models/<model>/suite-manifest.yaml]
+    uv run python scripts/audit_intake.py intake/<model>/<revision>
 
 Derives coverage from two sources that the intake file cannot override:
-  * the model manifest: which rows a suite declares (row_ids);
+  * the model's composed suites (shared catalog + model manifest): which rows a suite declares;
   * the filesystem: whether each item's method path exists.
 
 Reports three kinds of problem and exits non-zero if any are found:
@@ -27,16 +27,17 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def manifest_rows(manifest_path: Path) -> dict[str, dict]:
-    """row id -> {'suite': suite_id, 'mandatory': bool} for every suite the manifest declares."""
-    data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+def manifest_rows(model: str) -> dict[str, dict]:
+    """row id -> {'suite': suite_id, 'mandatory': bool}, from the model's composed suites
+    (shared catalog + model manifest), exactly as the runner sees them."""
+    from novita_self_test.config import ModelProfile
+
     declared: dict[str, dict] = {}
-    for suite in data.get("suites", []):
-        for row in suite.get("row_ids", []) or []:
-            key = str(row)
-            if key in declared:
-                raise SystemExit(f"row {key} is declared by more than one suite")
-            declared[key] = {"suite": suite["suite_id"], "mandatory": bool(suite.get("mandatory", True))}
+    for suite in ModelProfile.load(model, root=ROOT, allow_blocked=True).suites:
+        for row in suite.row_ids:
+            if row in declared:
+                raise SystemExit(f"row {row} is declared by more than one suite")
+            declared[row] = {"suite": suite.suite_id, "mandatory": suite.mandatory}
     return declared
 
 
@@ -71,20 +72,18 @@ def audit(items: list[dict], declared: dict[str, dict]) -> tuple[list[str], list
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("directory", type=Path, help="intake/<model>/<revision>")
-    parser.add_argument("--manifest", type=Path, help="defaults to models/<model>/suite-manifest.yaml")
     parser.add_argument("--strict", action="store_true", help="treat gap rows as failures")
     args = parser.parse_args(argv)
 
     directory = args.directory if args.directory.is_absolute() else ROOT / args.directory
     model = directory.parent.name
-    manifest = args.manifest or ROOT / "models" / model / "suite-manifest.yaml"
-    if not manifest.is_file():
-        print(f"no manifest for model {model!r}: {manifest}", file=sys.stderr)
+    if not (ROOT / "models" / model / "profile.yaml").is_file():
+        print(f"no model profile for {model!r} under models/", file=sys.stderr)
         return 2
     items_path = directory / "items.yaml"
     items = yaml.safe_load(items_path.read_text(encoding="utf-8"))["items"]
 
-    failures, notes, derived = audit(items, manifest_rows(manifest))
+    failures, notes, derived = audit(items, manifest_rows(model))
     gaps = [n for n in notes if n.startswith("gap:")]
     if args.strict:
         failures.extend(gaps)

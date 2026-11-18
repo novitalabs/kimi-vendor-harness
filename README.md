@@ -84,7 +84,8 @@ lowest official observation. Deterministic rows must pass 100%.
 ```text
 scripts/kvh                  local entrypoint (endpoint → nvst)
 src/novita_self_test/        nvst CLI, orchestration, adapters, reporting
-models/<model>/              profile, pinned requirement snapshot, suite manifest
+models/<model>/              profile, pinned requirement snapshot, rows + model-specific values
+suites/k3-family.yaml        test sets shared by every K3-family model (K3, K3-Flash, K3.1)
 suites/novita-api/           Novita endpoint tests and fixtures
 suites/kimi-code-bench/      Kimi Code Bench runner
 suites/deepswe/              DeepSWE Pier adapter

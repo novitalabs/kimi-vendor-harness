@@ -1397,3 +1397,31 @@ def test_resume_only_suite_reruns_single_terminal_suite_in_place(
         "passed",
         "blocked",
     ]
+
+
+def test_shared_suite_catalog_composes_model_overrides(tmp_path: Path) -> None:
+    model = write_model(tmp_path, [fake_suite("only", "R1")])
+    (tmp_path / "suites").mkdir()
+    (tmp_path / "suites/shared.yaml").write_text(yaml.safe_dump({"schema_version": 1, "suites": {
+        "shared-set": {"adapter": "fake", "config": {"rerun_policy": {"mode": "runner_owned", "max_reruns": 0, "scheduling": "immediate"}, "level": 1, "nested": {"a": 1, "b": 2}}},
+    }}), encoding="utf-8")
+    profile = yaml.safe_load((model / "profile.yaml").read_text())
+    profile["suite_catalog"] = "suites/shared.yaml"
+    (model / "profile.yaml").write_text(yaml.safe_dump(profile), encoding="utf-8")
+    manifest = yaml.safe_load((model / "suite-manifest.yaml").read_text())
+    entry = manifest["suites"][0]
+    manifest["suites"] = [{"use": "shared-set", "suite_id": entry["suite_id"], "row_ids": entry["row_ids"],
+                           "selectors": entry.get("selectors", {}), "completeness": entry.get("completeness", {}),
+                           "config": {"level": 2, "nested": {"b": 3}}}]
+    (model / "suite-manifest.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    suite = ModelProfile.load("test-model", root=tmp_path).suites[0]
+    assert suite.adapter == "fake"
+    assert suite.config["level"] == 2  # model override wins
+    assert suite.config["nested"] == {"a": 1, "b": 3}  # mappings merge recursively
+    assert "suites/shared.yaml" in ModelProfile.load("test-model", root=tmp_path).content_hashes()
+
+    manifest["suites"][0]["use"] = "missing-set"
+    (model / "suite-manifest.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    with pytest.raises(ConfigError, match="unknown shared suite"):
+        ModelProfile.load("test-model", root=tmp_path)

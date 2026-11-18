@@ -1,407 +1,92 @@
+# kimi-k3-flash: which shared K3-family test sets this model runs, for which official rows,
+# and only the values where this model differs. Shared definitions: suites/k3-family.yaml
 schema_version: 1
 suite_contract_version: 1
 suites:
-  - suite_id: stream-spec-p0
-    adapter: novita_api
-    test_class: feature
-    row_ids: ["1.0"]
-    mandatory: true
-    selectors: {"1.0": [suites/novita-api/tests/streaming/test_stream_spec.py]}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 2, scheduling: immediate}
-      cwd: .
-      python: "{repository_root}/vendor/kvv-k3/.venv/bin/python"
-      paths: [suites/novita-api/tests/streaming/test_stream_spec.py]
-      artifact_plugin: pytest_artifacts
-      acceptance_non_blocking_case_patterns: [test_stream_spec_prefill_error]
-      env:
-        PYTHONPATH: "{repository_root}/suites/novita-api:{repository_root}/vendor/kvv-k3"
-        KVV_ROOT: "{repository_root}/vendor/kvv-k3"
-        STREAM_SPEC_PRIORITY: P0
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 pytest suites/novita-api/tests/streaming/test_stream_spec.py"
-        concurrency_scope: serial_test_process
-        concurrency: "1"
-        retry_owner: pytest_rerunfailures
-        retry_max_reruns: "2"
-        retry_schedule: immediate
-        artifact_contract: "cases.jsonl,summary.json"
-        source: Moonshot-Streaming-Output-Spec-List-for-Vendor
-        doc_revision: "244"
-        file_sha256: 74edfb0d85a022714151c4da6600ba5adf472c243a3146d7a03b59f35e0b6a4e
-        uncovered_policy: default_pass
-    completeness:
-      expected_counts: {total: 25, passed: 9, skipped: 16, failed: 0, error: 0}
-      required_artifacts: [cases.jsonl, summary.json]
-
-  - suite_id: stream-spec-p1
-    adapter: novita_api
-    test_class: feature
-    row_ids: ["1.1"]
-    mandatory: true
-    selectors: {"1.1": [suites/novita-api/tests/streaming/test_stream_spec.py]}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 2, scheduling: immediate}
-      cwd: .
-      python: "{repository_root}/vendor/kvv-k3/.venv/bin/python"
-      paths: [suites/novita-api/tests/streaming/test_stream_spec.py]
-      artifact_plugin: pytest_artifacts
-      env:
-        PYTHONPATH: "{repository_root}/suites/novita-api:{repository_root}/vendor/kvv-k3"
-        KVV_ROOT: "{repository_root}/vendor/kvv-k3"
-        STREAM_SPEC_PRIORITY: P1
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 pytest suites/novita-api/tests/streaming/test_stream_spec.py"
-        concurrency_scope: serial_test_process
-        concurrency: "1"
-        retry_owner: pytest_rerunfailures
-        retry_max_reruns: "2"
-        retry_schedule: immediate
-        artifact_contract: "cases.jsonl,summary.json"
-        source: Moonshot-Streaming-Output-Spec-List-for-Vendor
-        doc_revision: "244"
-        file_sha256: 74edfb0d85a022714151c4da6600ba5adf472c243a3146d7a03b59f35e0b6a4e
-        uncovered_policy: default_pass
-    completeness:
-      expected_counts: {total: 25, passed: 12, skipped: 13, failed: 0, error: 0}
-      required_artifacts: [cases.jsonl, summary.json]
-
-  - suite_id: image-test
-    adapter: replay
-    test_class: feature
-    row_ids: ["2"]
-    mandatory: true
-    selectors: {"2": []}
-    config:
-      rerun_policy: {mode: any_pass, max_reruns: 3, scheduling: batch_after_formal}
-      kind: image
-      fixture: suites/novita-api/fixtures/vendor-img-testcases-inhouse-3.jsonl
-      timeout_seconds: 900
-      failure_exit_is_valid: true
-      runner_fingerprint:
-        entrypoint: "novita-self-test replay_fixture.py image"
-        concurrency_scope: serial_requests
-        concurrency: "1"
-        request_timeout_seconds: "900"
-        retry_owner: profile_batch_any_pass
-        retry_max_reruns: "3"
-        retry_schedule: batch_after_formal
-        artifact_contract: "run.json,summary.jsonl,summary.md,verdict.json,case request/response files"
-        repository: novita-self-test
-        fixture: vendor-img-testcases-inhouse-3.jsonl
-        fixture_sha256: a9884595c640fe06738f37868932f04cc1c071e8dbb58faa51cb916c6b5bbd4f
-    completeness:
-      expected_counts: {total: 25, passed: 25, failed: 0}
-      expected_max_images: 1000
-      required_artifacts: [run.json, verdict.json, summary.jsonl, summary.md]
-
-  - suite_id: kvv-params
-    adapter: kvv
-    test_class: feature
-    row_ids: ["3"]
-    mandatory: true
-    selectors: {"3": [tests/params]}
-    config:
-      rerun_policy: {mode: any_pass, max_reruns: 3, scheduling: batch_after_formal}
-      repeat: 10
-      develop_repeat: 1
-      repeat_schedule: round_barrier
-      cwd: vendor/kvv-k3
-      python: "{repository_root}/vendor/kvv-k3/.venv/bin/python"
-      paths: [tests/params]
-      artifact_plugin: pytest_artifacts
-      pytest_args: [-n, "19", --dist, load]
-      env: {PYTHONPATH: "{repository_root}/suites/novita-api:{repository_root}/vendor/kvv-k3"}
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 pytest tests/params"
-        concurrency_scope: per_repeat_case_count
-        concurrency: "19"
-        worker_budget_per_repeat: "19"
-        round_scheduling: round_barrier
-        retry_owner: profile_batch_any_pass
-        retry_max_reruns: "3"
-        retry_schedule: batch_after_formal
-        artifact_contract: "repeat-summary.json,repeat-*/cases.jsonl,repeat-*/summary.json"
-        repository: MoonshotAI/kvv-k3
-        upstream: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-    completeness:
-      expected_repeats: 10
-      required_artifacts: [repeat-summary.json]
-      per_repeat:
-        expected_counts: {total: 19}
-        required_artifacts: [cases.jsonl, summary.json]
-
-  - suite_id: walle
-    adapter: walle
-    test_class: feature
-    row_ids: ["4"]
-    mandatory: true
-    selectors: {"4": [tests/tool_call_json_schema]}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 3, scheduling: immediate}
-      repeat: 10
-      develop_repeat: 1
-      repeat_schedule: round_barrier
-      cwd: vendor/kvv-k3
-      python: "{repository_root}/vendor/kvv-k3/.venv/bin/python"
-      paths: [tests/tool_call_json_schema]
-      artifact_plugin: pytest_artifacts
-      env: {PYTHONPATH: "{repository_root}/suites/novita-api:{repository_root}/vendor/kvv-k3"}
-      pytest_args:
-        - -n
-        - "428"
-        - --dist
-        - load
-        - --thinking
-        - --reruns
-        - "3"
-        - --reruns-delay
-        - "2"
-        - --tool-json-report
-        - "{suite_dir}/tool-call-schema-report.json"
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 pytest tests/tool_call_json_schema"
-        concurrency_scope: per_repeat_case_count
-        concurrency: "428"
-        worker_budget_per_repeat: "428"
-        round_scheduling: round_barrier
-        retry_owner: pytest_rerunfailures
-        retry_max_reruns: "3"
-        retry_schedule: immediate
-        artifact_contract: "repeat-summary.json,repeat-*/cases.jsonl,repeat-*/summary.json; tool-call-schema-report optional"
-        repository: MoonshotAI/kvv-k3
-        upstream: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-        suite: tool_call_json_schema
-    completeness:
-      expected_repeats: 10
-      required_artifacts: [repeat-summary.json]
-      per_repeat:
-        expected_counts: {total: 428}
-        required_artifacts: [cases.jsonl, summary.json]
-
-  - suite_id: kvv-k3-features
-    adapter: kvv
-    test_class: feature
-    row_ids: ["5"]
-    mandatory: true
-    selectors: {"5": [tests/k3_features]}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 5, scheduling: immediate}
-      repeat: 10
-      develop_repeat: 1
-      repeat_schedule: round_barrier
-      cwd: vendor/kvv-k3
-      python: "{repository_root}/vendor/kvv-k3/.venv/bin/python"
-      paths: [tests/k3_features]
-      artifact_plugin: pytest_artifacts
-      pytest_args: [-n, "118", --dist, load]
-      env: {PYTHONPATH: "{repository_root}/suites/novita-api:{repository_root}/vendor/kvv-k3"}
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 pytest tests/k3_features"
-        concurrency_scope: per_repeat_case_count
-        concurrency: "118"
-        worker_budget_per_repeat: "118"
-        round_scheduling: round_barrier
-        retry_owner: pytest_markers
-        retry_max_reruns: "5"
-        retry_schedule: immediate
-        artifact_contract: "repeat-summary.json,repeat-*/cases.jsonl,repeat-*/summary.json"
-        repository: MoonshotAI/kvv-k3
-        upstream: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-    completeness:
-      expected_repeats: 10
-      required_artifacts: [repeat-summary.json]
-      per_repeat:
-        expected_counts: {total: 118}
-        required_artifacts: [cases.jsonl, summary.json]
-
-  - suite_id: kvv-prompt-tokens
-    adapter: kvv
-    test_class: feature
-    row_ids: ["6"]
-    mandatory: true
-    selectors: {"6": [tests/prompt_tokens]}
-    config:
-      rerun_policy: {mode: any_pass, max_reruns: 3, scheduling: batch_after_formal}
-      repeat: 10
-      develop_repeat: 1
-      repeat_schedule: round_barrier
-      cwd: vendor/kvv-k3
-      python: "{repository_root}/vendor/kvv-k3/.venv/bin/python"
-      paths: [tests/prompt_tokens]
-      artifact_plugin: pytest_artifacts
-      pytest_args: [-n, "74", --dist, load]
-      env: {PYTHONPATH: "{repository_root}/suites/novita-api:{repository_root}/vendor/kvv-k3"}
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 pytest tests/prompt_tokens"
-        concurrency_scope: per_repeat_case_count
-        concurrency: "74"
-        worker_budget_per_repeat: "74"
-        round_scheduling: round_barrier
-        retry_owner: profile_batch_any_pass
-        retry_max_reruns: "3"
-        retry_schedule: batch_after_formal
-        artifact_contract: "repeat-summary.json,repeat-*/cases.jsonl,repeat-*/summary.json"
-        repository: MoonshotAI/kvv-k3
-        upstream: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-    completeness:
-      expected_repeats: 10
-      required_artifacts: [repeat-summary.json]
-      per_repeat:
-        expected_counts: {total: 74}
-        required_artifacts: [cases.jsonl, summary.json]
-
-  - suite_id: toolcall-thinking-max
-    adapter: inspect
-    test_class: precision
-    row_ids: ["7"]
-    mandatory: true
-    selectors: {"7": []}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 3, scheduling: immediate}
-      cwd: vendor/kvv-k3
-      command: ["{repository_root}/vendor/kvv-k3/.venv/bin/python", eval.py, kimi_toolcall, --model, "{think_mode}/{served_model}", --think-mode, "{think_mode}", --thinking-effort, max, --max-tokens, "32768", --max-connections, "71", --epochs, "5", --client-timeout, "86400", --temperature, "1.0", --top-p, "0.95", --stream, --dataset, toolcall_benchmark/toolcall_thinking_samples.stable2.jsonl]
-      env:
-        INSPECT_LOG_DIR: "{suite_dir}"
-        PYTHONPATH: "{repository_root}/vendor/kvv-k3"
-      official_scores: [0.979]
-      tolerance_pp: 2.0
-      tolerance_mode: lower_bound
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 eval.py kimi_toolcall"
-        concurrency_scope: task_count
-        concurrency: "71"
-        retry_owner: inspect_ai
-        retry_max_reruns: "3"
-        retry_schedule: immediate
-        retry_on_error: "3"
-        client_timeout_seconds: "86400"
-        artifact_contract: "one .eval log,stdout.log,stderr.log"
-        runner: MoonshotAI/kvv-k3
-        repository: MoonshotAI/kvv-k3
-        repository_commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-        dataset: toolcall-thinking-stable2-71
-        epochs: "5"
-        effort: max
-    completeness:
-      expected_counts: {total: 355, unscored: 0}
-      required_artifact_patterns: ["**/*.eval"]
-
-  - suite_id: inspect-ocr-max
-    adapter: inspect
-    test_class: precision
-    row_ids: ["8"]
-    mandatory: true
-    selectors: {"8": []}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 3, scheduling: immediate}
-      cwd: vendor/kvv-k3
-      command: ["{repository_root}/vendor/kvv-k3/.venv/bin/python", -m, novita_self_test.adapters.inspect_benchmark_run, ocrbench, --model, "{think_mode}/{served_model}", --max-tokens, "16384", --thinking, --think-mode, "{think_mode}", --stream, --max-connections, "900", --retry-on-error, "3", --client-timeout, "86400", --temperature, "1.0", --top-p, "0.95", --thinking-effort, max]
-      env: {INSPECT_LOG_DIR: "{suite_dir}", HTTP_PROXY: "http://172.17.0.1:1081", HTTPS_PROXY: "http://172.17.0.1:1081", NO_PROXY: "api.ppio.com,localhost,127.0.0.1"}
-      official_score: 0.883
-      tolerance_pp: 2.0
-      tolerance_mode: lower_bound
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 eval.py ocrbench"
-        concurrency_scope: inspect_requests
-        concurrency: "900"
-        retry_owner: inspect_ai
-        retry_max_reruns: "3"
-        retry_schedule: immediate
-        retry_on_error: "3"
-        client_timeout_seconds: "86400"
-        artifact_contract: "one .eval log,stdout.log,stderr.log"
-        runner: MoonshotAI/kvv-k3/eval.py
-        repository: MoonshotAI/kvv-k3
-        repository_commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-        dataset: ocrbench
-        effort: max
-    completeness:
-      expected_trials: 1000
-      required_artifact_patterns: ["**/*.eval"]
-
-  - suite_id: inspect-mmmu-max
-    adapter: inspect
-    test_class: precision
-    row_ids: ["9"]
-    mandatory: true
-    selectors: {"9": []}
-    config:
-      rerun_policy: {mode: runner_owned, max_reruns: 3, scheduling: immediate}
-      cwd: vendor/kvv-k3
-      command: ["{repository_root}/vendor/kvv-k3/.venv/bin/python", -m, novita_self_test.adapters.inspect_benchmark_run, mmmu, --model, "{think_mode}/{served_model}", --max-tokens, "98304", --thinking, --think-mode, "{think_mode}", --stream, --max-connections, "900", --retry-on-error, "3", --client-timeout, "86400", --temperature, "1.0", --top-p, "0.95", --thinking-effort, max]
-      env: {INSPECT_LOG_DIR: "{suite_dir}", HTTP_PROXY: "http://172.17.0.1:1081", HTTPS_PROXY: "http://172.17.0.1:1081", NO_PROXY: "api.ppio.com,localhost,127.0.0.1"}
-      official_score: 0.785
-      tolerance_pp: 2.0
-      tolerance_mode: lower_bound
-      runner_fingerprint:
-        entrypoint: "MoonshotAI/kvv-k3 eval.py mmmu"
-        concurrency_scope: inspect_requests
-        concurrency: "900"
-        retry_owner: inspect_ai
-        retry_max_reruns: "3"
-        retry_schedule: immediate
-        retry_on_error: "3"
-        client_timeout_seconds: "86400"
-        artifact_contract: "one .eval log,stdout.log,stderr.log"
-        runner: MoonshotAI/kvv-k3/eval.py
-        repository: MoonshotAI/kvv-k3
-        repository_commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
-        dataset: mmmu-pro-10c
-        effort: max
-    completeness:
-      expected_trials: 1730
-      required_artifact_patterns: ["**/*.eval"]
-
-  - suite_id: deepswe
-    adapter: deepswe
-    test_class: precision
-    row_ids: ["10"]
-    mandatory: true
-    long_test: deepswe
-    selectors: {"10": []}
-    config:
-      rerun_policy: {mode: error_only, max_reruns: 1, scheduling: batch_after_formal}
-      min_score: 0.628
-      transport: local
-      runtime_root: /srv/kvh/deepswe
-      pier_bin: /srv/kvh/venvs/pier/bin/pier
-      expected_deep_swe_commit: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
-      expected_pier_version: 0.3.1
-      expected_tasks: 113
-      rounds: 3
-      max_reruns: 1
-      agent_timeout_multiplier: 2.0
-      max_concurrency: 113
-      kimi_code_version: 0.29.0
-      extra_headers: unsupported
-      runner_fingerprint:
-        entrypoint: "Pier deep-swe/tasks via pier_kimi.kimi_code:KimiCode"
-        concurrency_scope: global_task_jobs
-        concurrency: "113"
-        max_concurrency: "113"
-        same_task_overlap: forbidden
-        round_scheduling: mixed_round_task_locked
-        retry_owner: profile_error_only
-        retry_max_reruns: "1"
-        retry_schedule: batch_after_formal
-        retry_on_errors: "1"
-        artifact_contract: "local-preflight.json,deepswe-checkpoint.json,round-*-summary.json,round-summary.json,task-results.jsonl,adapter-result.json"
-        pier: 0.3.1
-        kimi-code: 0.29.0
-        corpus: deep-swe-113
-        deep-swe-commit: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
-        transport: local
-        rounds: "3"
-        max-reruns: "1"
-        agent-timeout-multiplier: "2.0"
-        task-pass-policy: error-only
-        formal-rounds-mixed: "true"
-      # Reduced from the default 113 to fit a 2-replica test deployment.
-      concurrency: 50
-    completeness:
-      expected_tasks: 113
-      expected_rounds: 3
-      expected_max_reruns: 1
-      required_artifacts: [local-preflight.json, deepswe-checkpoint.json, round-01-summary.json, round-02-summary.json, round-03-summary.json, round-summary.json, task-results.jsonl, adapter-result.json]
-
+- use: stream-spec-p0
+  row_ids:
+  - '1.0'
+  selectors:
+    '1.0':
+    - suites/novita-api/tests/streaming/test_stream_spec.py
+- use: stream-spec-p1
+  row_ids:
+  - '1.1'
+  selectors:
+    '1.1':
+    - suites/novita-api/tests/streaming/test_stream_spec.py
+- use: image-test
+  row_ids:
+  - '2'
+  selectors:
+    '2': []
+- use: kvv-params
+  row_ids:
+  - '3'
+  selectors:
+    '3':
+    - tests/params
+  config:
+    develop_repeat: 1
+- use: walle
+  row_ids:
+  - '4'
+  selectors:
+    '4':
+    - tests/tool_call_json_schema
+  config:
+    develop_repeat: 1
+- use: kvv-k3-features
+  row_ids:
+  - '5'
+  selectors:
+    '5':
+    - tests/k3_features
+  config:
+    develop_repeat: 1
+- use: kvv-prompt-tokens
+  row_ids:
+  - '6'
+  selectors:
+    '6':
+    - tests/prompt_tokens
+  config:
+    develop_repeat: 1
+- use: toolcall-thinking-stable2-max
+  suite_id: toolcall-thinking-max
+  row_ids:
+  - '7'
+  selectors:
+    '7': []
+- use: inspect-ocr-max
+  row_ids:
+  - '8'
+  selectors:
+    '8': []
+  config:
+    official_score: 0.883
+    runner_fingerprint:
+      repository: MoonshotAI/kvv-k3
+      repository_commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
+- use: inspect-mmmu-max
+  row_ids:
+  - '9'
+  selectors:
+    '9': []
+  config:
+    official_score: 0.785
+    runner_fingerprint:
+      repository: MoonshotAI/kvv-k3
+      repository_commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
+- use: deepswe
+  row_ids:
+  - '10'
+  selectors:
+    '10': []
+  config:
+    min_score: 0.628
+    agent_timeout_multiplier: 2.0
+    runner_fingerprint:
+      agent-timeout-multiplier: '2.0'
+    # Reduced from the default 113 to fit a 2-replica test deployment.
+    concurrency: 50

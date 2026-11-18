@@ -40,6 +40,45 @@ class ConfigError(ValueError):
         self.code = code
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Mappings merge recursively; any other value in ``override`` replaces the base value."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _compose_suites(raw_suites: list[Any], catalog_path: Path | None) -> list[Any]:
+    """Expand ``use: <id>`` manifest entries from the shared suite catalog.
+
+    A model manifest lists which shared test sets it runs (``use``), for which official rows
+    (``row_ids``, ``selectors``), and only the values where this model differs from the shared
+    definition. The composed suite's ``suite_id`` defaults to the catalog id.
+    """
+    if not any(isinstance(item, dict) and "use" in item for item in raw_suites):
+        return raw_suites
+    if catalog_path is None:
+        raise ConfigError("suite_manifest_invalid", "manifest uses shared suites but the profile has no suite_catalog")
+    catalog = _load_yaml(catalog_path).get("suites")
+    if not isinstance(catalog, dict):
+        raise ConfigError("suite_manifest_invalid", f"{catalog_path} needs a 'suites' mapping")
+    composed = []
+    for item in raw_suites:
+        if not isinstance(item, dict) or "use" not in item:
+            composed.append(item)
+            continue
+        name = item["use"]
+        if not isinstance(catalog.get(name), dict):
+            raise ConfigError("suite_manifest_invalid", f"unknown shared suite {name!r} in {catalog_path.name}")
+        suite = _deep_merge(catalog[name], {key: value for key, value in item.items() if key != "use"})
+        suite.setdefault("suite_id", name)
+        composed.append(suite)
+    return composed
+
+
 def workspace_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -393,6 +432,8 @@ class ModelProfile:
         if profile.get("model_id") != model_id:
             raise ConfigError("profile_model_mismatch", f"{base}/profile.yaml model_id mismatch")
         repository_root = base.parents[1]
+        catalog_value = profile.get("suite_catalog")
+        catalog_path = repository_root / str(catalog_value) if catalog_value else None
         pinned_paths = []
         stream = source.get("stream_spec_contract") or {}
         if isinstance(stream, dict) and stream.get("snapshot_path") and stream.get("sha256"):
@@ -451,6 +492,7 @@ class ModelProfile:
         raw_suites = manifest.get("suites")
         if not isinstance(raw_suites, list) or not raw_suites:
             raise ConfigError("suite_manifest_invalid", "suite-manifest needs suites")
+        raw_suites = _compose_suites(raw_suites, catalog_path)
         suites = tuple(
             SuiteDefinition.from_dict(item, index=index)
             for index, item in enumerate(raw_suites)
@@ -639,6 +681,8 @@ class ModelProfile:
             self.directory / "requirements" / "rows.yaml",
             self.directory / "suite-manifest.yaml",
         ]
+        if self.profile.get("suite_catalog"):
+            paths.append(root / str(self.profile["suite_catalog"]))
         stream = self.source.get("stream_spec_contract") or {}
         if isinstance(stream, dict) and isinstance(stream.get("snapshot_path"), str):
             paths.append(root / stream["snapshot_path"])
