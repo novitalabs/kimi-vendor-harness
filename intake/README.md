@@ -38,6 +38,12 @@ runs. The K3 seed already has rows like that: row 2's `vendor-img-testcases-inho
 does not resolve from the repository root, and row 17 names a runner by description
 rather than by path.
 
+## Filling gaps
+
+For an item with `coverage: gap`, first check [METHOD-POOL.md](METHOD-POOL.md): runnable methods that
+exist in the repository but no manifest runs. Only write a new method when none fits. Either way,
+wiring a method into a model manifest is a reviewed change.
+
 ## Validation
 
 ```bash
