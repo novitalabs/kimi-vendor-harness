@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -54,7 +55,7 @@ def test_pytest_attempt_registers_summary_artifact_without_completeness_input(
     monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
     class ArtifactRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 '{"nodeid":"test_a","outcome":"passed","phase":"call"}\n',
@@ -83,7 +84,7 @@ def test_pytest_known_p0_failure_is_marked_non_blocking_only_when_exclusive(
             self.nodeids = nodeids
 
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 "".join(
@@ -152,6 +153,10 @@ class CapturingRunner(FakeRunner):
         return super().run(command, cwd=cwd, env=env, timeout=timeout)
 
 
+def artifact_dir_arg(command: list[str]) -> str:
+    return next(token.split("=", 1)[1] for token in command if token.startswith("--artifact-dir="))
+
+
 def context(
     tmp_path: Path,
     adapter: str,
@@ -190,7 +195,8 @@ def test_pytest_adapter_builds_secret_free_command(tmp_path: Path, adapter: str)
     assert command[:3] == ["python3", "-m", "pytest"]
     assert "novita_self_test.pytest_extra_headers" in command
     assert "--api-key" not in command
-    assert "--artifact-dir" in command
+    assert any(token.startswith("--artifact-dir=") for token in command)
+    assert "--artifact-dir" not in command  # one token; see PytestAdapter.build_command
 
 
 def test_concurrency_override_rewrites_supported_runner_flags(tmp_path: Path) -> None:
@@ -566,7 +572,7 @@ def test_pytest_adapter_collects_declared_artifact_globs(tmp_path: Path, monkeyp
 
     class ArtifactRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             response_dir = artifact_dir / "openclaw-responses" / "line-10"
             response_dir.mkdir(parents=True)
             (response_dir / "response.body").write_text("failure body", encoding="utf-8")
@@ -595,7 +601,7 @@ def test_pytest_setup_failure_is_execution_invalid(tmp_path: Path, monkeypatch) 
 
     class SetupFailureRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 '{"nodeid":"tests/example.py::test_case","outcome":"failed",'
@@ -621,7 +627,7 @@ def test_pytest_http_401_failure_is_service_invalid(tmp_path: Path, monkeypatch)
 
     class CredentialFailureRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 json.dumps(
@@ -653,7 +659,7 @@ def test_pytest_quota_failure_is_service_invalid(tmp_path: Path, monkeypatch) ->
 
     class QuotaFailureRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 json.dumps(
@@ -695,7 +701,7 @@ def test_pytest_partial_timeout_requires_batch_rerun(
 
     class PartialTimeoutRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             records = [
                 {
@@ -764,7 +770,7 @@ def test_pytest_classifies_exception_lines_not_test_source(
 
     class SourceInLongreprRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             record = {
                 "nodeid": "tests/example.py::test_case",
@@ -795,7 +801,7 @@ def test_pytest_batch_rerun_recovers_only_retryable_case(
 
         def run(self, command, *, cwd, env, timeout):
             self.commands.append(command)
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             if len(self.commands) == 1:
                 records = [
@@ -856,7 +862,7 @@ def test_pytest_any_pass_reruns_explicit_failure(tmp_path: Path, monkeypatch) ->
 
         def run(self, command, *, cwd, env, timeout):
             self.calls += 1
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             outcome = "failed" if self.calls == 1 else "passed"
             (artifact_dir / "cases.jsonl").write_text(
@@ -919,7 +925,7 @@ def test_pytest_any_pass_exhausted_reruns_keep_failure_class(
 
         def run(self, command, *, cwd, env, timeout):
             self.calls += 1
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             record = {"nodeid": "tests/example.py::test_behavior", "outcome": "failed", "phase": "call",
                       "longrepr": longrepr}
@@ -942,45 +948,40 @@ def test_pytest_any_pass_exhausted_reruns_keep_failure_class(
     assert (result.status, result.validity) == expected
 
 
-def test_pytest_rerun_selects_nodeids_relative_to_suite_cwd(tmp_path: Path, monkeypatch) -> None:
-    """Recorded node ids are rootdir-relative; a suite running from a sub-directory must get them
-    rewritten relative to its cwd, otherwise each rerun collects zero tests."""
-    monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
-    (tmp_path / "vendor/kvv/tests").mkdir(parents=True)
-    nodeid = "vendor/kvv/tests/test_x.py::test_case[a]"
+def test_pytest_records_nodeids_selectable_from_suite_cwd(tmp_path: Path) -> None:
+    """Rerun waves pass recorded node ids back to pytest as selectors from the suite's cwd. If the
+    adapter's command lets pytest pick this repository as rootdir (instead of vendor/kvv-k3), the
+    ids gain a ``vendor/kvv-k3/`` prefix and every rerun silently collects zero tests."""
+    root = Path(__file__).resolve().parents[2]
+    python = root / "vendor/kvv-k3/.venv/bin/python"
+    if not python.exists():
+        pytest.skip("vendor/kvv-k3 environment not synced (uv sync)")
+    from novita_self_test.config import ModelProfile
 
-    class Runner(FakeRunner):
-        def __init__(self) -> None:
-            self.commands = []
-
-        def run(self, command, *, cwd, env, timeout):
-            self.commands.append(command)
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
-            artifact_dir.mkdir(parents=True, exist_ok=True)
-            outcome = "failed" if len(self.commands) == 1 else "passed"
-            record = {"nodeid": nodeid, "outcome": outcome, "phase": "call",
-                      "longrepr": "E   AssertionError: mismatch" if outcome == "failed" else ""}
-            (artifact_dir / "cases.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
-            return subprocess.CompletedProcess(command, 1 if outcome == "failed" else 0, stdout="", stderr="")
-
-    runner = Runner()
-    ctx = context(
-        tmp_path,
-        "kvv",
-        {
-            "python": "python3",
-            "cwd": "vendor/kvv",
-            "paths": ["tests"],
-            "artifact_plugin": "plugin",
-            "rerun_policy": {"mode": "any_pass", "max_reruns": 3, "scheduling": "batch_after_formal"},
-        },
-    )
-    result = adapter_for("kvv", runner=runner).run(ctx)
-    assert len(runner.commands) == 2
-    assert "tests/test_x.py::test_case[a]" in runner.commands[1]
-    assert nodeid not in runner.commands[1]
-    assert (result.status, result.validity) == ("passed", "valid")
-
+    profile = ModelProfile.load("kimi-k3", allow_blocked=True)
+    suite = next(s for s in profile.suites if s.suite_id == "kvv-prompt-tokens")
+    service = ServiceAccess.load(write_service(tmp_path))
+    # Like a real run: the artifact directory exists and lives under this repository's runs/.
+    suite_dir = root / "runs" / f"_rootdir_probe_{os.getpid()}" / "suite"
+    suite_dir.mkdir(parents=True, exist_ok=True)
+    ctx = AdapterContext(suite=suite, service=service, run_dir=suite_dir.parent,
+                         suite_dir=suite_dir, repository_root=root)
+    command = adapter_for("kvv", runner=FakeRunner()).build_command(ctx)
+    flags_with_value = {"-n", "--dist"}  # xdist options from pytest_args; not needed to collect
+    command = [t for i, t in enumerate(command)
+               if t not in flags_with_value and (i == 0 or command[i - 1] not in flags_with_value)]
+    try:
+        probe = subprocess.run(
+            command + ["--collect-only", "-q", "-o", "addopts="],
+            cwd=root / str(suite.config["cwd"]),
+            env={**os.environ, "PYTHONPATH": f"{root}/src:{root}/suites/novita-api:{root}/vendor/kvv-k3"},
+            capture_output=True, text=True, timeout=300,
+        )
+    finally:
+        shutil.rmtree(suite_dir.parent, ignore_errors=True)
+    collected = [line for line in probe.stdout.splitlines() if "::" in line]
+    assert collected, probe.stdout[-1500:] + probe.stderr[-1500:]
+    assert all(line.startswith("tests/prompt_tokens/") for line in collected), collected[:3]
 
 def test_pytest_adapter_repeats_and_aggregates_independent_artifacts(
     tmp_path: Path, monkeypatch
@@ -992,7 +993,7 @@ def test_pytest_adapter_repeats_and_aggregates_independent_artifacts(
             self.artifact_dirs = []
 
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             self.artifact_dirs.append(artifact_dir)
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
@@ -1071,7 +1072,7 @@ def test_pytest_adapter_repeat_continues_after_valid_failure(
 
         def run(self, command, *, cwd, env, timeout):
             self.calls += 1
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             outcome = "failed" if artifact_dir.parent.name == "repeat-02" else "passed"
             (artifact_dir / "cases.jsonl").write_text(
@@ -1130,7 +1131,7 @@ def test_pytest_valid_case_failure_is_not_runner_contract_invalid(
 
     class FailedCaseRunner(FakeRunner):
         def run(self, command, *, cwd, env, timeout):
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 json.dumps(
@@ -1169,7 +1170,7 @@ def test_pytest_adapter_runs_all_formal_rounds_after_execution_invalid(
 
         def run(self, command, *, cwd, env, timeout):
             self.calls += 1
-            artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+            artifact_dir = Path(artifact_dir_arg(command))
             artifact_dir.mkdir(parents=True, exist_ok=True)
             (artifact_dir / "cases.jsonl").write_text(
                 '{"nodeid":"tests/example.py::test_case","outcome":"failed",'

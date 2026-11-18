@@ -74,6 +74,9 @@ Earlier runs ended `inconclusive` because of three harness bugs, all fixed with 
 2. Failure classification read pytest's whole `longrepr`, which includes the test's source; an
    `except (openai.APITimeoutError, ...)` clause there made every assertion failure look retryable.
    Only the `E ` exception lines are classified now.
-3. Rerun waves passed rootdir-relative node ids (`vendor/kvv-k3/tests/...`) to a pytest process
-   running in `vendor/kvv-k3`, so each rerun collected zero tests. Node ids are now rewritten
-   relative to the suite's cwd. This affected rows 3 and 6 for both kimi-k3 and kimi-k3-flash.
+3. The adapter passed `--artifact-dir <path>` as two tokens. pytest picks its rootdir before plugin
+   options are known, so it treated the path as a test path and chose this repository as rootdir
+   (and its `pyproject.toml` as config) instead of `vendor/kvv-k3`. Recorded node ids gained a
+   `vendor/kvv-k3/` prefix, and each rerun wave, run from `vendor/kvv-k3`, collected zero tests.
+   The option is now passed as `--artifact-dir=<path>`. This affected rows 3 and 6 for both
+   kimi-k3 and kimi-k3-flash (and which pytest config every vendor/kvv-k3 suite loaded).

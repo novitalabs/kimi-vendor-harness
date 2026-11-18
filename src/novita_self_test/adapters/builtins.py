@@ -59,25 +59,6 @@ def _resolve_cwd(context: AdapterContext) -> Path:
     return candidate.resolve()
 
 
-def _rerun_selectors(context: AdapterContext, nodeids: list[str]) -> tuple[str, ...]:
-    """Turn recorded pytest node ids into arguments that select them again from the suite's cwd.
-
-    Recorded node ids are relative to pytest's rootdir (the repository root), but suites may run
-    from a sub-directory (e.g. ``vendor/kvv-k3``). Passed unchanged, such ids collect nothing and
-    every rerun wave silently runs zero tests.
-    """
-    cwd = _resolve_cwd(context)
-    root = context.repository_root.resolve()
-    selectors = []
-    for nodeid in nodeids:
-        path, sep, rest = nodeid.partition("::")
-        absolute = (root / path).resolve()
-        if absolute.is_relative_to(cwd):
-            path = absolute.relative_to(cwd).as_posix()
-        selectors.append(path + sep + rest)
-    return tuple(selectors)
-
-
 def _runner_fingerprint(context: AdapterContext) -> dict[str, str]:
     raw = context.suite.config.get("runner_fingerprint") or {}
     return {str(key): str(value) for key, value in raw.items()}
@@ -345,7 +326,10 @@ class PytestAdapter(CommandAdapter):
             ]
         )
         if plugin:
-            command.extend(["--artifact-dir", str(context.suite_dir.resolve())])
+            # One token on purpose: pytest picks its rootdir before plugin options are known, so a
+            # separate path argument would be counted as a test path and could pull rootdir (and the
+            # ini config) up to this repository instead of the suite's own, e.g. vendor/kvv-k3.
+            command.append(f"--artifact-dir={context.suite_dir.resolve()}")
         command.extend(
             _format_tokens(list(context.suite.config.get("pytest_args") or []), context)
         )
@@ -578,7 +562,7 @@ class PytestAdapter(CommandAdapter):
             for index in round_indexes:
                 prior = (previous or {}).get(index)
                 rerun_cases = list((prior.coverage if prior else {}).get("rerun_cases") or [])
-                selector_args = _rerun_selectors(context, rerun_cases) if rerun_cases else context.selector_args
+                selector_args = tuple(rerun_cases) if rerun_cases else context.selector_args
                 name = "formal" if wave == 0 else f"rerun-{wave:02d}"
                 attempt_context = replace(
                     context,
@@ -760,7 +744,7 @@ class PytestAdapter(CommandAdapter):
                 retry_context = replace(
                     context,
                     suite_dir=context.suite_dir / f"rerun-{wave:02d}",
-                    selector_args=_rerun_selectors(context, rerun_cases) if rerun_cases else context.selector_args,
+                    selector_args=tuple(rerun_cases) if rerun_cases else context.selector_args,
                 )
                 retry = self._run_once(retry_context, {})
                 result = self._merge_case_rerun(result, retry, policy)
