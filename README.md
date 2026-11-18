@@ -10,9 +10,17 @@ one verdict with evidence.
 ```bash
 git clone git@github.com:wz1qqx/kimi-vendor-harness.git
 cd kimi-vendor-harness
-uv sync                                        # harness
-(cd vendor/kvv-k3 && uv sync)                  # K3-family official verifier (K3, K3-Flash, K3.1)
+scripts/setup-pack.sh core
+export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python"
+export NVST_KVV_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"
+export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python"
+export NVST_BIN="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/nvst"
+scripts/check-packs.py --pack core
 ```
+
+The repository is the shared test library; every user owns their own virtualenvs,
+cache, optional long-test runtime, Docker host, and credentials. Optional packs
+are installed or prepared independently; see [docs/dependency-packs.md](docs/dependency-packs.md).
 
 Provide the endpoint token: `export KIMI_API_KEY=...`, or register it once in
 the private registry (see [docs/credentials.md](docs/credentials.md)).
@@ -55,9 +63,9 @@ reports DeepSWE (row 17), BEAM (row 16) and Code Bench as blocked:
 
 | Suite | Needs | Host setting (environment variable) |
 |---|---|---|
-| DeepSWE, row 17 | Pier and the deep-swe task corpus ([docs/deepswe.md](docs/deepswe.md)) | `NVST_DEEPSWE_ROOT`, `NVST_PIER_BIN` |
+| DeepSWE, row 17 | User-owned Pier and deep-swe corpus ([docs/deepswe.md](docs/deepswe.md)) | `NVST_DEEPSWE_ROOT`, `NVST_PIER_BIN` |
 | BEAM, row 16 | Judge access ([docs/credentials.md](docs/credentials.md)) | `--judge-access` file |
-| Code Bench | A runner host with Docker | `NVST_CODE_BENCH_HOST`, `NVST_CODE_BENCH_WORKDIR_ROOT`, `NVST_CODE_BENCH_CACHE_ROOT`, `NVST_CODE_BENCH_CONTAINER_PROXY` |
+| Code Bench | User-owned SSH/Docker runner host | `NVST_CODE_BENCH_HOST`, `NVST_CODE_BENCH_WORKDIR_ROOT`, `NVST_CODE_BENCH_CACHE_ROOT`, `NVST_CODE_BENCH_CONTAINER_PROXY` |
 
 Host settings say where a suite runs, not what it tests, so they are not part of the shared test-set
 definitions or the suite input hash. If your network needs a proxy to reach the endpoint or to download
@@ -65,7 +73,7 @@ benchmark datasets, set `HTTP(S)_PROXY` in your own shell; suites inherit it.
 
 Results land in `runs/<model>/<run-id>/`: `acceptance.md` / `acceptance.json`
 for the verdict, per-suite directories for evidence, and `test-artifacts/` as a
-shareable bundle. `uv run nvst list --model kimi-k3` shows every row and selector.
+shareable bundle. `"$NVST_BIN" list --model kimi-k3` shows every row and selector.
 
 ## What each row checks
 
@@ -96,8 +104,8 @@ It is not an endpoint test: a framework adapter receives token-decoder output as
 normalized reasoning/content/tool calls.
 
 ```bash
-uv run python scripts/validate_parse_vectors.py
-uv run python scripts/run_parse_vectors.py --adapter 'python /path/to/framework_parser_adapter.py'
+"$NVST_HARNESS_PYTHON" scripts/validate_parse_vectors.py
+"$NVST_HARNESS_PYTHON" scripts/run_parse_vectors.py --adapter 'python /path/to/framework_parser_adapter.py'
 ```
 
 The adapter protocol and expected normalized result are documented in
@@ -125,7 +133,7 @@ reference), [docs/k3-test-catalog.md](docs/k3-test-catalog.md),
 ## Development
 
 ```bash
-uv run pytest -q tests     # unit + e2e (no endpoint traffic)
+"$NVST_HARNESS_PYTHON" -m pytest -q tests     # unit + e2e (no endpoint traffic)
 ```
 
 ## Tool-call contract suite (standalone)
@@ -137,7 +145,7 @@ the official row matrix; run it directly against an endpoint:
 
 ```bash
 cd vendor/kvv-k3 && PYTHONPATH=../../suites/novita-api:. KVV_ROOT=. TC_SAMPLES=8 \
-  TC_OBSERVATIONS_DIR=/tmp/tc .venv/bin/python -m pytest \
+  TC_OBSERVATIONS_DIR=/tmp/tc "$NVST_KVV_PYTHON" -m pytest \
   ../../suites/novita-api/tests/toolcall_contract \
   --base-url $URL --smoke-model $M --think-mode opensource -q
 ```

@@ -36,9 +36,14 @@ if [ -z "$family" ]; then
   family="${family:-kimi-k3}"
 fi
 
+harness_python="${NVST_HARNESS_PYTHON:-$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python}"
+nvst_bin="${NVST_BIN:-$(dirname "$harness_python")/nvst}"
+[ -x "$harness_python" ] || { echo "harness pack is not installed: run scripts/setup-pack.sh core" >&2; exit 2; }
+[ -x "$nvst_bin" ] || { echo "nvst executable is missing next to $harness_python" >&2; exit 2; }
+
 cd "$root"
 if [ -z "${KIMI_API_KEY:-}" ]; then
-  auth="$(uv run --quiet python scripts/nvst_credentials.py resolve --url "$base_url" --role endpoint)" || {
+  auth="$("$harness_python" scripts/nvst_credentials.py resolve --url "$base_url" --role endpoint)" || {
     echo "no token: export KIMI_API_KEY, or register this URL with scripts/nvst_credentials.py set" >&2; exit 2; }
   KIMI_API_KEY="${auth#Authorization: Bearer }"
 fi
@@ -46,7 +51,7 @@ export KIMI_API_KEY
 
 access_dir="$root/cases"
 access="$(BASE_URL="$base_url" MODEL="$served_model" THINK="$think_mode" HEADERS="$headers_json" FAMILY="$family" \
-  ACCESS_DIR="$access_dir" python3 - <<'EOF'
+  ACCESS_DIR="$access_dir" "$harness_python" - <<'EOF'
 import hashlib, json, os, re
 doc = {
     "model_family": os.environ["FAMILY"],
@@ -71,6 +76,6 @@ EOF
 
 cmd="$1"; shift
 case "$cmd" in
-  develop|accept|doctor) exec uv run nvst "$cmd" --service-access "$access" "$@" ;;
-  *) exec uv run nvst "$cmd" "$@" ;;
+  develop|accept|doctor) exec "$nvst_bin" "$cmd" --service-access "$access" "$@" ;;
+  *) exec "$nvst_bin" "$cmd" "$@" ;;
 esac

@@ -22,6 +22,7 @@ read-only.
   from this snapshot. Its three benchmark families are max-only, BEAM is
   excluded, and Git LFS fixtures must be materialized before execution.
 - Run endpoints locally through `scripts/kvh` (or `uv run nvst ... --service-access`).
+- Dependency packs are per-user/per-host. Use `scripts/setup-pack.sh` and `scripts/check-packs.py`; never assume a shared build host, shared cache, or shared long-test runtime.
 - Execute the shared K3-family verifier from `vendor/kvv-k3`. Never copy or
   edit official verifier tests here.
 - `suites/novita-api/`, `suites/kimi-code-bench/`, and `suites/deepswe/` are

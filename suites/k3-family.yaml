@@ -14,7 +14,7 @@ suites:
         max_reruns: 2
         scheduling: immediate
       cwd: .
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - suites/novita-api/tests/streaming/test_stream_spec.py
       artifact_plugin: pytest_artifacts
@@ -56,7 +56,7 @@ suites:
         max_reruns: 2
         scheduling: immediate
       cwd: .
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - suites/novita-api/tests/streaming/test_stream_spec.py
       artifact_plugin: pytest_artifacts
@@ -96,7 +96,7 @@ suites:
         max_reruns: 2
         scheduling: immediate
       cwd: .
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - suites/novita-api/tests/streaming/test_stream_spec.py
       artifact_plugin: pytest_artifacts
@@ -174,7 +174,7 @@ suites:
       repeat: 10
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - tests/params
       artifact_plugin: pytest_artifacts
@@ -219,7 +219,7 @@ suites:
       repeat: 10
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - tests/tool_call_json_schema
       artifact_plugin: pytest_artifacts
@@ -272,7 +272,7 @@ suites:
       repeat: 10
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - tests/k3_features
       artifact_plugin: pytest_artifacts
@@ -317,7 +317,7 @@ suites:
       repeat: 10
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
-      python: '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      python: '{kvv_python}'
       paths:
       - tests/prompt_tokens
       artifact_plugin: pytest_artifacts
@@ -361,7 +361,7 @@ suites:
         scheduling: immediate
       cwd: .
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - suites/novita-api/toolcall_benchmark/run.py
       - --dataset-path
       - suites/novita-api/fixtures/toolcall-thinking-samples.v1.json.gz
@@ -429,7 +429,7 @@ suites:
         scheduling: immediate
       cwd: .
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - suites/novita-api/toolcall_benchmark/run.py
       - --dataset-path
       - suites/novita-api/fixtures/toolcall-thinking-samples.v1.json.gz
@@ -497,7 +497,7 @@ suites:
         scheduling: immediate
       cwd: .
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - suites/novita-api/toolcall_benchmark/run.py
       - --dataset-path
       - suites/novita-api/fixtures/toolcall-thinking-samples.v1.json.gz
@@ -565,7 +565,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - -m
       - novita_self_test.adapters.inspect_benchmark_run
       - ocrbench
@@ -622,7 +622,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - -m
       - novita_self_test.adapters.inspect_benchmark_run
       - ocrbench
@@ -679,7 +679,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - -m
       - novita_self_test.adapters.inspect_benchmark_run
       - ocrbench
@@ -735,7 +735,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - -m
       - novita_self_test.adapters.inspect_benchmark_run
       - mmmu
@@ -792,7 +792,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - -m
       - novita_self_test.adapters.inspect_benchmark_run
       - mmmu
@@ -849,7 +849,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - -m
       - novita_self_test.adapters.inspect_benchmark_run
       - mmmu
@@ -912,7 +912,7 @@ suites:
       - --output-dir
       - '{suite_dir}'
       - --python
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - --kvv-root
       - '{repository_root}/vendor/kvv-k3'
       - --max-tokens
@@ -1162,7 +1162,7 @@ suites:
         scheduling: immediate
       cwd: vendor/kvv-k3
       command:
-      - '{repository_root}/vendor/kvv-k3/.venv/bin/python'
+      - '{kvv_python}'
       - eval.py
       - kimi_toolcall
       - --model

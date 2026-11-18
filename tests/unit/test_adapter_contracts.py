@@ -345,7 +345,7 @@ def test_header_merge_preserves_existing_and_applies_service_override() -> None:
 
 def test_pytest_header_plugin_injects_httpx_headers(tmp_path: Path) -> None:
     product_root = Path(__file__).resolve().parents[2]
-    kvv_python = product_root / "vendor/kvv-k3/.venv/bin/python"
+    kvv_python = Path(os.environ.get("NVST_KVV_PYTHON", str(product_root / "vendor/kvv-k3/.venv/bin/python")))
     test_file = tmp_path / "test_headers.py"
     test_file.write_text(
         "import httpx\n"
@@ -909,14 +909,15 @@ def test_pytest_any_pass_exhausted_reruns_keep_failure_class(
     assert (result.status, result.validity) == expected
 
 
-def test_pytest_records_nodeids_selectable_from_suite_cwd(tmp_path: Path) -> None:
+def test_pytest_records_nodeids_selectable_from_suite_cwd(tmp_path: Path, monkeypatch) -> None:
     """Rerun waves pass recorded node ids back to pytest as selectors from the suite's cwd. If the
     adapter's command lets pytest pick this repository as rootdir (instead of vendor/kvv-k3), the
     ids gain a ``vendor/kvv-k3/`` prefix and every rerun silently collects zero tests."""
     root = Path(__file__).resolve().parents[2]
-    python = root / "vendor/kvv-k3/.venv/bin/python"
+    python = Path(os.environ.get("NVST_KVV_PYTHON", str(root / "vendor/kvv-k3/.venv/bin/python")))
     if not python.exists():
         pytest.skip("vendor/kvv-k3 environment not synced (uv sync)")
+    monkeypatch.setenv("NVST_KVV_PYTHON", str(python))
     from novita_self_test.config import ModelProfile
 
     profile = ModelProfile.load("kimi-k3", allow_blocked=True)
@@ -935,7 +936,11 @@ def test_pytest_records_nodeids_selectable_from_suite_cwd(tmp_path: Path) -> Non
         probe = subprocess.run(
             command + ["--collect-only", "-q", "-o", "addopts="],
             cwd=root / str(suite.config["cwd"]),
-            env={**os.environ, "PYTHONPATH": f"{root}/src:{root}/suites/novita-api:{root}/vendor/kvv-k3"},
+            env={
+            **os.environ,
+            "NVST_KVV_PYTHON": str(python),
+            "PYTHONPATH": f"{root}/src:{root}/suites/novita-api:{root}/vendor/kvv-k3",
+        },
             capture_output=True, text=True, timeout=300,
         )
     finally:

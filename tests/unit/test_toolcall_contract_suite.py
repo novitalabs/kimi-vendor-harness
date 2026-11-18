@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PYTHON = ROOT / "vendor/kvv-k3/.venv/bin/python"
+PYTHON = Path(os.environ.get("NVST_KVV_PYTHON", str(ROOT / "vendor/kvv-k3/.venv/bin/python")))
 SUITE = "suites/novita-api/tests/toolcall_contract"
 FAKE = ROOT / "tests/support/fake_k3_server.py"
 

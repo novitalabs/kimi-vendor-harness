@@ -240,7 +240,10 @@ def _check(
 
 
 def _entrypoint_exists(value: str, root: Path) -> bool:
-    rendered = value.replace("{repository_root}", str(root))
+    rendered = value.replace("{repository_root}", str(root)).replace(
+        "{kvv_python}",
+        os.environ.get("NVST_KVV_PYTHON", str((root / "vendor/kvv-k3/.venv/bin/python").resolve())),
+    )
     if "/" not in rendered:
         return shutil.which(rendered) is not None
     return Path(rendered).resolve().is_file()

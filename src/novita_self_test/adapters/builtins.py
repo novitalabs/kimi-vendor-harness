@@ -47,6 +47,10 @@ def _format_tokens(tokens: list[Any], context: AdapterContext) -> list[str]:
         "run_dir": str(context.run_dir.resolve()),
         "suite_dir": str(context.suite_dir.resolve()),
         "repository_root": str(context.repository_root.resolve()),
+        "kvv_python": os.environ.get(
+            "NVST_KVV_PYTHON",
+            str((context.repository_root / "vendor/kvv-k3/.venv/bin/python").resolve()),
+        ),
     }
     return [str(token).format_map(values) for token in tokens]
 
