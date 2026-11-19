@@ -20,7 +20,7 @@ a plain grep is wrong because manifest paths are cwd-relative.
 ## Novita methods (suites/novita-api)
 
 Before writing an endpoint test for an output-parser defect, use the framework-neutral
-`suites/novita-api/tests/parse_contract_vectors.jsonl` contract. It is the preferred method for
+`suites/novita-api/tests/k3-parser-conformance.jsonl` contract. It is the preferred method for
 cases whose input is generated output rather than an HTTP request; each framework supplies an adapter.
 
 

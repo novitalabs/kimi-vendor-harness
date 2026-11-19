@@ -2,11 +2,10 @@
 """Check per-user dependency packs without contacting a model endpoint.
 
 Examples:
-  uv run python scripts/check-packs.py --pack core
-  uv run python scripts/check-packs.py --pack vision
-  uv run python scripts/check-packs.py --pack deepswe
-  uv run python scripts/check-packs.py --pack codebench
-  uv run python scripts/check-packs.py --pack all --model kimi-k3
+  scripts/check-packs.py --pack core
+  scripts/check-packs.py --pack vision
+  scripts/check-packs.py --pack deepswe
+  scripts/check-packs.py --pack all --model kimi-k3
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -54,7 +52,7 @@ def check_imports(names: list[str], label: str, python: Path | None = None) -> l
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pack", choices=["core", "vision", "deepswe", "codebench", "all"], default="core")
+    parser.add_argument("--pack", choices=["core", "vision", "deepswe", "all"], default="core")
     parser.add_argument("--model", choices=["kimi-k3", "kimi-k3-flash"], default="kimi-k3")
     args = parser.parse_args()
 
@@ -85,21 +83,6 @@ def main() -> int:
         else:
             print("BLOCKED DeepSWE: set NVST_DEEPSWE_ROOT and NVST_PIER_BIN to a user-owned installation")
             failures += 1
-    if args.pack in {"codebench", "all"}:
-        names = [
-            "NVST_CODE_BENCH_HOST",
-            "NVST_CODE_BENCH_WORKDIR_ROOT",
-            "NVST_CODE_BENCH_CACHE_ROOT",
-            "NVST_CODE_BENCH_CONTAINER_PROXY",
-        ]
-        missing = [name for name in names if not os.environ.get(name)]
-        if missing:
-            print(f"BLOCKED Code Bench host: set {', '.join(missing)}")
-            failures += 1
-        else:
-            print(f"READY   Code Bench host: {os.environ['NVST_CODE_BENCH_HOST']}")
-        if shutil.which("docker") is None:
-            print("WARN    Code Bench host: local docker command is not present (the runner may be remote)")
     return 1 if failures else 0
 
 

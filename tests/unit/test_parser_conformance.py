@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-VECTORS = ROOT / "suites/novita-api/tests/parse_contract_vectors.jsonl"
+VECTORS = ROOT / "suites/novita-api/tests/k3-parser-conformance.jsonl"
 
 
 def test_parse_vectors_validate_and_preserve_source_cases() -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
-    from validate_parse_vectors import load_vectors
+    from parser_conformance_lib import load_vectors
 
     cases = load_vectors(VECTORS)
     assert len(cases) == 7
@@ -33,7 +33,7 @@ def test_parse_vectors_validate_and_preserve_source_cases() -> None:
 
 def test_parse_vector_validator_rejects_duplicate_or_incomplete_case(tmp_path: Path) -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
-    from validate_parse_vectors import load_vectors
+    from parser_conformance_lib import load_vectors
 
     case = json.loads(VECTORS.read_text().splitlines()[0])
     case["expected"].pop("content")
@@ -53,7 +53,7 @@ def test_parse_vector_runner_sends_chunks_and_reports_mismatch(tmp_path: Path) -
         encoding="utf-8",
     )
     process = subprocess.run(
-        [sys.executable, "scripts/run_parse_vectors.py", "--adapter", f"{sys.executable} {adapter}",
+        [sys.executable, "scripts/run-parser-conformance.py", "--adapter", f"{sys.executable} {adapter}",
          "--vectors", str(VECTORS)],
         cwd=ROOT, capture_output=True, text=True,
     )

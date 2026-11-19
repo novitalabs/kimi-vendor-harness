@@ -117,9 +117,3 @@ suites:
   - '18'
   selectors:
     '18': []
-- use: kimi-code-bench
-  row_ids:
-  - K3-CB
-  selectors:
-    kimi-code-bench:smoke: []
-    kimi-code-bench:extended: []

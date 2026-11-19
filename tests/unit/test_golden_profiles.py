@@ -27,7 +27,7 @@ def test_k3_flash_keeps_its_external_and_threshold_boundaries() -> None:
         *[str(value) for value in range(2, 11)],
     ]
     suite_ids = {suite.suite_id for suite in profile.suites}
-    assert {"stream-spec-p2", "toolcall-arguments-recovery", "kimi-code-bench", "beam-1m"}.isdisjoint(
+    assert {"stream-spec-p2", "toolcall-arguments-recovery", "beam-1m"}.isdisjoint(
         suite_ids
     )
     assert profile.source["verifier_repository"]["commit"] == (

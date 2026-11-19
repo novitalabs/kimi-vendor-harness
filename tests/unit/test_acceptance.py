@@ -15,7 +15,6 @@ from novita_self_test.reporting import build_report
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_ROWS = ["1.0", "1.1", "1.2", *[str(index) for index in range(2, 19)]]
-EXPECTED_SUPPLEMENTARY_ROWS = ["K3-CB"]
 EXPECTED_SUITES = [
     "stream-spec-p0",
     "stream-spec-p1",
@@ -37,7 +36,6 @@ EXPECTED_SUITES = [
     "beam-1m",
     "deepswe",
 ]
-EXPECTED_SUPPLEMENTARY_SUITES = ["kimi-code-bench"]
 
 
 def test_k3_rows_follow_feishu_table_order() -> None:
@@ -59,7 +57,7 @@ def test_k3_rows_follow_feishu_table_order() -> None:
     assert rows[17]["job"] == "BEAM 1M"
     assert rows[-2]["job"] == "DeepSWE"
     assert rows[-1]["job"] == "Toolcall arguments recovery / invalid and truncated arguments"
-    assert [row["row_id"] for _, row in profile.supplementary_rows()] == EXPECTED_SUPPLEMENTARY_ROWS
+    assert profile.supplementary_rows() == []
 
 
 def test_k3_suites_are_one_to_one_and_follow_table_order() -> None:
@@ -67,15 +65,11 @@ def test_k3_suites_are_one_to_one_and_follow_table_order() -> None:
 
     official_suites = [suite for suite in profile.suites if suite.row_ids[0] in EXPECTED_ROWS]
     assert [suite.suite_id for suite in official_suites] == EXPECTED_SUITES + ["toolcall-arguments-recovery"]
-    assert [suite.suite_id for suite in profile.suites if suite.row_ids[0] in EXPECTED_SUPPLEMENTARY_ROWS] == EXPECTED_SUPPLEMENTARY_SUITES
     assert [list(suite.row_ids) for suite in official_suites] == [
         [row_id] for row_id in EXPECTED_ROWS
     ]
     assert all(row_id in suite.selectors for row_id, suite in zip(EXPECTED_ROWS, official_suites))
-    assert [suite.long_test for suite in profile.suites if suite.long_test] == [
-        "deepswe",
-        "code-bench",
-    ]
+    assert [suite.long_test for suite in profile.suites if suite.long_test] == ["deepswe"]
     expected_runner_owned = {
         "1.0": 2,
         "1.1": 2,
@@ -89,13 +83,6 @@ def test_k3_suites_are_one_to_one_and_follow_table_order() -> None:
     for suite in profile.suites:
         row_id = suite.row_ids[0]
         policy = suite.config["rerun_policy"]
-        if row_id == "K3-CB":
-            assert policy == {
-                "mode": "runner_owned",
-                "max_reruns": 1,
-                "scheduling": "immediate",
-            }
-            continue
         if row_id in expected_runner_owned:
             assert policy == {
                 "mode": "runner_owned",
@@ -122,7 +109,7 @@ def test_k3_acceptance_modes_pin_scope_and_deepswe_rounds() -> None:
     assert profile.profile["test_groups"] == {
         "precision": ["7", "8", "9", "10", "11", "12", "13", "14", "15", "17"],
         "feature": ["1.0", "1.1", "1.2", "2", "3", "4", "5", "6", "18"],
-        "optional_precision": ["16", "kimi-code-bench:extended"],
+        "optional_precision": ["16"],
     }
     simple = profile.acceptance_mode_config("simple")
     full = profile.acceptance_mode_config("full")
@@ -138,8 +125,6 @@ def test_k3_acceptance_modes_pin_scope_and_deepswe_rounds() -> None:
     assert full["deepswe_rounds"] == 3
     assert simple["include_long"] == ["deepswe"]
     assert full["include_long"] == ["deepswe"]
-    assert "kimi-code-bench:extended" not in simple["selectors"]
-    assert "kimi-code-bench:extended" not in full["selectors"]
     assert "16" not in simple["selectors"]
     assert "16" not in full["selectors"]
     assert sop["source"] == "moonshot-k3-sop"
@@ -196,27 +181,6 @@ def test_acceptance_mode_enum_is_consistent_across_schema_and_cli() -> None:
     assert {"simple", "full", "precision-core", "k3-sop"} <= profile_modes
 
 
-def test_k3_code_bench_is_optional_precision() -> None:
-    profile = ModelProfile.load("kimi-k3")
-    suite = next(item for item in profile.suites if item.suite_id == "kimi-code-bench")
-    assert suite.test_class == "precision"
-    assert suite.mandatory is False
-    assert suite.row_ids == ("K3-CB",)
-    assert suite.long_test == "code-bench"
-    assert suite.config["concurrency"] == 89
-    assert suite.config["runner_fingerprint"]["per_task_concurrency"] == "1"
-    assert suite.config["runner_fingerprint"]["concurrency_scope"] == "task_count"
-    assert suite.config["runner_fingerprint"]["schedule"] == "task_pipelines"
-    assert suite.config["runner_fingerprint"]["round_scheduling"] == "task_pipelines"
-    assert suite.completeness["selector_completeness"]["kimi-code-bench:extended"] == {
-        "expected_tasks": 89,
-        "expected_trials": 267,
-        "required_artifacts": ["finalization-manifest.json", "adapter-result.json"],
-    }
-    beam = next(item for item in profile.suites if item.suite_id == "beam-1m")
-    assert beam.mandatory is False
-
-
 def test_k3_suites_have_complete_feature_precision_classification() -> None:
     profile = ModelProfile.load("kimi-k3")
     by_class = {
@@ -247,7 +211,6 @@ def test_k3_suites_have_complete_feature_precision_classification() -> None:
             "inspect-mmmu-max",
             "beam-1m",
             "deepswe",
-            "kimi-code-bench",
         },
     }
 
@@ -285,7 +248,7 @@ def test_k3_source_pins_feishu_revision_444() -> None:
         "executable_rows": 15,
         "first_item": "0 Stream spec / p0",
         "last_item": "14 DeepSWE",
-        "active_supplementary_items": ["Kimi Code bench"],
+        "active_supplementary_items": [],
         "structured_rows_sha256": "aa4018242c7ecc963cbb08c514f7a02395d23730418c3e557f358675e8a6d1ec",
         "rows_file_sha256": "d58f71fd8764ff49a0b363981d5e7847bc5b5786ad7244e1f69b371a32807e75",
     }
@@ -686,8 +649,8 @@ def test_k3_report_preserves_table_order_and_image_completion() -> None:
     assert report["verdict"] == "passed"
     assert report["acceptance_mode"] is None
     assert report["official_row_count"] == 20
-    assert report["supplementary_row_count"] == 1
-    assert [row["row_id"] for row in report["supplementary"]] == ["K3-CB"]
+    assert report["supplementary_row_count"] == 0
+    assert report["supplementary"] == []
     assert [row["row_id"] for row in report["official_rows"]] == EXPECTED_ROWS
     assert report["official_rows"][3]["actual"] == {
         "counts": {"total": 25, "passed": 25, "failed": 0},

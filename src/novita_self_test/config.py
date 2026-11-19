@@ -85,10 +85,6 @@ def _compose_suites(raw_suites: list[Any], catalog_path: Path | None) -> list[An
 HOST_SETTING_ENV = {
     "runtime_root": "NVST_DEEPSWE_ROOT",
     "pier_bin": "NVST_PIER_BIN",
-    "host": "NVST_CODE_BENCH_HOST",
-    "workdir_root": "NVST_CODE_BENCH_WORKDIR_ROOT",
-    "runtime_cache_root": "NVST_CODE_BENCH_CACHE_ROOT",
-    "container_proxy": "NVST_CODE_BENCH_CONTAINER_PROXY",
 }
 
 
@@ -110,6 +106,14 @@ def required_host_setting(key: str, configured: Any = None) -> str:
 
 def workspace_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def results_root(root: Path | None = None) -> Path:
+    """Return the per-user result root; defaults to the ignored repository ``runs/`` directory."""
+    configured = os.environ.get("NVST_RESULTS_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (root or workspace_root()).resolve() / "runs"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

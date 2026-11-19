@@ -20,7 +20,7 @@ except ImportError:
     from nvst_dynamic_endpoint import parse_secret_input
 
 from novita_self_test.artifacts import update_versioned_json, write_json
-from novita_self_test.config import find_secret
+from novita_self_test.config import find_secret, results_root
 from novita_self_test.events import emit_event
 
 
@@ -43,7 +43,7 @@ def write_control(path: Path, updates: dict[str, Any]) -> dict[str, Any]:
 
 def read_control(root: Path, run: str) -> tuple[Path, dict[str, Any]]:
     run_id_value = Path(run).name
-    path = root / "runs" / ".control" / f"{run_id_value}.json"
+    path = results_root(root) / ".control" / f"{run_id_value}.json"
     if not path.is_file():
         raise RuntimeError(f"managed run control not found: {run_id_value}")
     return path, json.loads(path.read_text(encoding="utf-8"))
@@ -601,9 +601,10 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError("headers JSON must be a string mapping")
         model = nvst_args[nvst_args.index("--model") + 1]
         identifier = run_id()
-        managed_run_dir = root / "runs" / model / identifier
+        run_root = results_root(root)
+        managed_run_dir = run_root / model / identifier
         nvst_args.extend(["--run-dir", str(managed_run_dir)])
-        control_path = root / "runs" / ".control" / f"{identifier}.json"
+        control_path = run_root / ".control" / f"{identifier}.json"
         endpoint = {
             "base_url": args.base_url.rstrip("/"),
             "served_model": args.served_model,

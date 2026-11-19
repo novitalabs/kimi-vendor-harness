@@ -172,6 +172,8 @@ suites:
         max_reruns: 3
         scheduling: batch_after_formal
       repeat: 10
+      # develop runs one un-repeated pass; acceptance uses the official repeat count.
+      develop_repeat: 1
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
       python: '{kvv_python}'
@@ -217,6 +219,8 @@ suites:
         max_reruns: 3
         scheduling: immediate
       repeat: 10
+      # develop runs one un-repeated pass; acceptance uses the official repeat count.
+      develop_repeat: 1
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
       python: '{kvv_python}'
@@ -270,6 +274,8 @@ suites:
         max_reruns: 5
         scheduling: immediate
       repeat: 10
+      # develop runs one un-repeated pass; acceptance uses the official repeat count.
+      develop_repeat: 1
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
       python: '{kvv_python}'
@@ -315,6 +321,8 @@ suites:
         max_reruns: 3
         scheduling: batch_after_formal
       repeat: 10
+      # develop runs one un-repeated pass; acceptance uses the official repeat count.
+      develop_repeat: 1
       repeat_schedule: round_barrier
       cwd: vendor/kvv-k3
       python: '{kvv_python}'
@@ -906,7 +914,7 @@ suites:
       cwd: .
       judge_timeout_seconds: 86400
       command:
-      - '{repository_root}/.venv/bin/python'
+      - '{harness_python}'
       - -m
       - novita_self_test.adapters.beam_run
       - --output-dir
@@ -1049,7 +1057,7 @@ suites:
         scheduling: immediate
       cwd: .
       command:
-      - '{repository_root}/.venv/bin/python'
+      - '{harness_python}'
       - '{repository_root}/suites/novita-api/toolcall_arguments_recovery.py'
       - --fixture-dir
       - '{repository_root}/suites/novita-api/fixtures'
@@ -1098,59 +1106,6 @@ suites:
       - adapter-result.json
       - case-a.json
       - case-b.json
-  kimi-code-bench:
-    adapter: code_bench
-    test_class: precision
-    mandatory: false
-    long_test: code-bench
-    config:
-      rerun_policy:
-        mode: runner_owned
-        max_reruns: 1
-        scheduling: immediate
-      concurrency: 89
-      remote:
-        # Host-specific values are required through NVST_CODE_BENCH_* environment variables.
-        port: 22
-      runner_fingerprint:
-        entrypoint: novita Kimi Code Bench runner/v2 kbench
-        concurrency_scope: task_count
-        concurrency: '89'
-        per_task_concurrency: '1'
-        rounds: '3'
-        retry_owner: kbench_runner
-        retry_max_reruns: '1'
-        retry_schedule: after_baseline
-        artifact_contract: code-bench-run-contract.json,finalization-manifest.json,archive/metrics.json,adapter-result.json
-        runner: novita-kimi-code-bench
-        version: 1.1.0
-        schedule: task_pipelines
-        round_scheduling: task_pipelines
-        global_concurrency_scope: task_count
-        recovery: abnormal_only
-        recovery_attempts_per_task: '1'
-        retry_on_errors: '3'
-        harbor_n_attempts: '1'
-      timeout_seconds: 86400
-    completeness:
-      expected_tasks: 89
-      expected_trials: 267
-      required_artifacts:
-      - finalization-manifest.json
-      - adapter-result.json
-      selector_completeness:
-        kimi-code-bench:smoke:
-          expected_tasks: 15
-          expected_trials: 45
-          required_artifacts:
-          - finalization-manifest.json
-          - adapter-result.json
-        kimi-code-bench:extended:
-          expected_tasks: 89
-          expected_trials: 267
-          required_artifacts:
-          - finalization-manifest.json
-          - adapter-result.json
   toolcall-thinking-stable2-max:
     adapter: inspect
     test_class: precision

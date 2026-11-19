@@ -52,6 +52,12 @@ def _write_run(
     return run_dir
 
 
+def test_collect_empty_or_missing_root_returns_empty_index(tmp_path: Path) -> None:
+    index = collect_runs(tmp_path / "missing")
+    assert index["run_count"] == 0
+    assert index["deployments"] == []
+
+
 def test_collect_groups_by_served_model_and_orders_by_time(tmp_path: Path) -> None:
     """Two deployments of one catalogue must never be merged into one score."""
     runs_root = tmp_path / "runs"

@@ -22,7 +22,6 @@ requirements:
   deep_swe_official_avg_at_3: 0.628
   deep_swe_official_avg_output_tokens: 77900
   closed_tests:
-    - kimi-code-bench
     - stress-test
 suite_catalog: suites/k3-family.yaml
 execution:

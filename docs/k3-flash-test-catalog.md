@@ -78,9 +78,9 @@ rounds. This is a profile policy, not a Python model-name branch.
 The official document includes requirements that are not represented as local
 traffic-generating suites:
 
-- Kimi Code Bench is a closed test owned by the Kimi team. The tested party must
-  not save its test data, so it is recorded as an external handoff rather than a
-  local `code_bench` suite.
+- One closed test is owned by the Kimi team. The tested party must not save
+  its test data, so it is recorded as an external handoff rather than a local
+  traffic-generating suite.
 - Moonshot owns the stress test. The external gate covers agreed concurrency and
   TPM, 24-hour duration, TTFT, OTPS, and absence of repetition, crosstalk, or
   nonsensical output.
@@ -99,13 +99,13 @@ requirement hashes even where they share a runner or fixture.
 Read the profile without vendor traffic:
 
 ```bash
-uv run nvst list --model kimi-k3-flash
+"$NVST_BIN" list --model kimi-k3-flash
 ```
 
-Run the complete local Flash acceptance :
+Run the complete local Flash acceptance:
 
 ```bash
-nvst accept --model kimi-k3-flash \
+"$NVST_BIN" accept --model kimi-k3-flash \
   --service-access service-access.json \
   --judge-access judge-access.json \
   --acceptance full
@@ -114,7 +114,7 @@ nvst accept --model kimi-k3-flash \
 执行正式验收前，先运行零流量契约预检；它会校验 profile、runner、artifact contract，以及 Toolcall 数据集样本数 × epochs 是否等于声明的 355 trials：
 
 ```bash
-nvst doctor --model kimi-k3-flash \
+"$NVST_BIN" doctor --model kimi-k3-flash \
   --service-access service-access.json \
   --acceptance full
 ```
@@ -124,7 +124,7 @@ capacity probe。该探测在并发 1、10、20 下发送短请求，结果只�
 不计入任何 acceptance 分数：
 
 ```bash
-nvst doctor --model kimi-k3-flash \
+"$NVST_BIN" doctor --model kimi-k3-flash \
   --service-access service-access.json \
   --acceptance full \
   --online-canary \
@@ -137,7 +137,7 @@ capacity probe 会记录每一档的成功率、延迟和 failure class。`engin
 Run only the shared DeepSWE selector during development:
 
 ```bash
-nvst develop --model kimi-k3-flash \
+"$NVST_BIN" develop --model kimi-k3-flash \
   --service-access service-access.json \
   --select 10
 ```

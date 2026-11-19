@@ -31,10 +31,10 @@ acceptance_control:
 test_groups:
   precision: ["7", "8", "9", "10", "11", "12", "13", "14", "15", "17"]
   feature: ["1.0", "1.1", "1.2", "2", "3", "4", "5", "6", "18"]
-  optional_precision: ["16", "kimi-code-bench:extended"]
+  optional_precision: ["16"]
 acceptance_modes:
   # Production order is required precision first, then feature coverage.
-  # BEAM and Kimi Code Bench remain explicitly selectable optional suites.
+  # BEAM remains an explicitly selectable optional suite.
   # Row 2 remains serial; rows 3..15 use their high request/worker budgets.
   simple:
     selectors: ["10", "11", "12", "17", "1.0", "1.1", "1.2", "2", "3", "4", "5", "6", "18"]
@@ -47,13 +47,13 @@ acceptance_modes:
   precision-core:
     # Scoped required precision run: toolcall thinking-effort rows plus
     # three-round DeepSWE. Feature rows and OCR/MMMU are out of scope;
-    # optional BEAM and Code Bench run only through explicit selectors.
+    # optional BEAM runs only through explicit selectors.
     selectors: ["7", "8", "9", "17"]
     include_long: [deepswe]
     deepswe_rounds: 3
   k3-sop:
     # Moonshot K3 上线 SOP required checks first, then current Novita-owned
-    # required coverage. Optional BEAM and Code Bench are explicit add-ons.
+    # required coverage. Optional BEAM is an explicit add-on.
     source: moonshot-k3-sop
     source_revision: 9
     selectors: ["7", "8", "9", "10", "11", "12", "13", "14", "15", "5", "6", "3", "4", "1.0", "1.1", "2", "17", "18"]

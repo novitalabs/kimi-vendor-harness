@@ -13,7 +13,6 @@ cd kimi-vendor-harness
 scripts/setup-pack.sh core
 export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python"
 export NVST_KVV_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"
-export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python"
 export NVST_BIN="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/nvst"
 scripts/check-packs.py --pack core
 ```
@@ -36,7 +35,13 @@ M=your-served-model-name
 # Zero-traffic environment check
 scripts/kvh --base-url $URL --served-model $M -- doctor --model kimi-k3
 
-# Tool-call fast gate (run after every code change)
+# Quick develop: one pass, no profile repeat wave. This still sends endpoint traffic.
+# Start with one deterministic row to keep the request budget bounded.
+scripts/kvh --base-url $URL --served-model $M -- \
+  develop --model kimi-k3 --select 6
+
+# Add rows deliberately; rows 4–6 use their single develop pass, but still
+# contain 408, 126, and 59 cases respectively.
 scripts/kvh --base-url $URL --served-model $M -- \
   develop --model kimi-k3 --select 6 --select 5 --select 4 --select 18
 
@@ -59,21 +64,27 @@ Other nvst commands pass through too, e.g.
 Use `--model kimi-k3` for K3 and K3.1; `kimi-k3-flash` for K3-Flash.
 
 Rows 1–15 and 18 only need the endpoint. On a machine without extra setup, `doctor`
-reports DeepSWE (row 17), BEAM (row 16) and Code Bench as blocked:
+reports DeepSWE (row 17) and BEAM (row 16) as blocked:
 
 | Suite | Needs | Host setting (environment variable) |
 |---|---|---|
 | DeepSWE, row 17 | User-owned Pier and deep-swe corpus ([docs/deepswe.md](docs/deepswe.md)) | `NVST_DEEPSWE_ROOT`, `NVST_PIER_BIN` |
 | BEAM, row 16 | Judge access ([docs/credentials.md](docs/credentials.md)) | `--judge-access` file |
-| Code Bench | User-owned SSH/Docker runner host | `NVST_CODE_BENCH_HOST`, `NVST_CODE_BENCH_WORKDIR_ROOT`, `NVST_CODE_BENCH_CACHE_ROOT`, `NVST_CODE_BENCH_CONTAINER_PROXY` |
 
 Host settings say where a suite runs, not what it tests, so they are not part of the shared test-set
 definitions or the suite input hash. If your network needs a proxy to reach the endpoint or to download
 benchmark datasets, set `HTTP(S)_PROXY` in your own shell; suites inherit it.
 
-Results land in `runs/<model>/<run-id>/`: `acceptance.md` / `acceptance.json`
-for the verdict, per-suite directories for evidence, and `test-artifacts/` as a
-shareable bundle. `"$NVST_BIN" list --model kimi-k3` shows every row and selector.
+Results land in `runs/<model>/<run-id>/` by default, or under the directory
+specified by `NVST_RESULTS_ROOT`. Each run contains `acceptance.md` /
+`acceptance.json`, per-suite evidence, and a `test-artifacts/` shareable bundle.
+For example:
+
+```bash
+export NVST_RESULTS_ROOT="$HOME/.cache/novita-kimi-vendor/runs"
+```
+
+`"$NVST_BIN" list --model kimi-k3` shows every row and selector.
 
 ## What each row checks
 
@@ -97,19 +108,19 @@ lowest official observation. Deterministic rows must pass 100%.
 
 ## Framework-neutral parser vectors
 
-`suites/novita-api/tests/parse_contract_vectors.jsonl` is a parser contract derived from the
+`suites/novita-api/tests/k3-parser-conformance.jsonl` is a parser contract derived from the
 `k3-flash-kvv` behaviour. It covers typed arguments, raw JSON byte preservation, marker text inside
 JSON strings, malformed-call isolation, undeclared-tool dropping, truncation, and attribute unescaping.
 It is not an endpoint test: a framework adapter receives token-decoder output as chunks and returns
 normalized reasoning/content/tool calls.
 
 ```bash
-"$NVST_HARNESS_PYTHON" scripts/validate_parse_vectors.py
-"$NVST_HARNESS_PYTHON" scripts/run_parse_vectors.py --adapter 'python /path/to/framework_parser_adapter.py'
+"$NVST_HARNESS_PYTHON" scripts/validate-parser-conformance.py
+"$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py --adapter 'python /path/to/framework_parser_adapter.py'
 ```
 
 The adapter protocol and expected normalized result are documented in
-`scripts/run_parse_vectors.py`. Endpoint tests remain in `suites/novita-api/tests/toolcall_contract/`.
+`scripts/run-parser-conformance.py`. Endpoint tests remain in `suites/novita-api/tests/toolcall_contract/`.
 
 ## Layout
 
@@ -119,7 +130,6 @@ src/novita_self_test/        nvst CLI, orchestration, adapters, reporting
 models/<model>/              profile, pinned requirement snapshot, rows + model-specific values
 suites/k3-family.yaml        test sets shared by every K3-family model (K3, K3-Flash, K3.1)
 suites/novita-api/           Novita endpoint tests and fixtures
-suites/kimi-code-bench/      Kimi Code Bench runner
 suites/deepswe/              DeepSWE Pier adapter
 vendor/kvv-k3/               read-only snapshot of MoonshotAI/kvv-k3 (see VENDORED.md)
 docs/                        contracts and per-model catalogs

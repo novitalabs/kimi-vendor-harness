@@ -15,7 +15,6 @@ performs offline checks.
 | `core` | `nvst`, KVV rows 1–6 and 18, endpoint smoke/fast gates | user-owned harness and KVV virtualenvs | `scripts/setup-pack.sh core` |
 | `vision` | OCRBench/MMMU rows 10–15 | KVV env, `HF_HOME`, datasets cache | `scripts/setup-pack.sh vision` |
 | `deepswe` | DeepSWE row 17 | `NVST_DEEPSWE_ROOT`, `NVST_PIER_BIN`, Docker/task images | prepare externally, then `check-packs.py --pack deepswe` |
-| `codebench` | optional K3-CB | SSH/Docker host and four `NVST_CODE_BENCH_*` values | prepare externally, then `check-packs.py --pack codebench` |
 
 ## New machine: core only
 
@@ -27,6 +26,8 @@ export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/py
 export NVST_KVV_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"
 export HF_HOME="$HOME/.cache/novita-kimi-vendor/huggingface"
 scripts/check-packs.py --pack core
+# Optional: keep ignored run evidence outside the checkout.
+export NVST_RESULTS_ROOT="$HOME/.cache/novita-kimi-vendor/runs"
 ```
 
 The core pack never needs access to Moonshot's private repository: `vendor/kvv-k3`
@@ -65,22 +66,6 @@ scripts/check-packs.py --pack deepswe
 The K3 profile still pins the expected DeepSWE commit, Pier version, task count,
 and score contract. The runtime path is only a host setting and is not part of
 the shared test-set definition.
-
-## Code Bench pack
-
-The Code Bench runner is in the repository, but its remote execution host,
-Docker proxy, work directories, and cache are not. Set these per user:
-
-```bash
-export NVST_CODE_BENCH_HOST='user@your-host'
-export NVST_CODE_BENCH_WORKDIR_ROOT='/var/lib/kbench/runs'
-export NVST_CODE_BENCH_CACHE_ROOT='/var/lib/kbench/.kbench-cache'
-export NVST_CODE_BENCH_CONTAINER_PROXY='http://your-proxy:1080'
-scripts/check-packs.py --pack codebench
-```
-
-The proxy is required only when that user's remote host needs one for dependency
-installation. The shared repository contains no default internal proxy.
 
 ## Full local preflight (no endpoint traffic)
 

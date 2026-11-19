@@ -55,7 +55,7 @@ on the first failed, blocked, or invalid result.
 For K3, simple runs required OCRBench rows 10..12, one DeepSWE round, then
 feature rows 1.0/1.1/1.2 through 6 and Row 18. Full runs required precision
 rows 7..15 and 17, then feature rows 1.0/1.1/1.2 through 6 and Row 18 with
-three DeepSWE rounds. BEAM Row 16 and extended Kimi Code Bench are optional
+three DeepSWE rounds. BEAM Row 16 and external gates are optional
 explicit suites and are not implicitly included in either mode.
 
 BEAM is two-phase: generation completes all vendor requests first, then its
@@ -200,15 +200,13 @@ index never recreates the test matrix.
 `parameters` (selector, rows, acceptance mode, concurrency, rounds, retry
 policy, timeout, dataset/fixture identity, model/think mode, redacted command)
 and normalized `dependencies` (expected pins versus observed runtime versions
-for external tools such as Harbor, Terminal Bench 2, Kimi CLI, uv, Pier,
-DeepSWE, the Code Bench runner, and both repository commits). Observed values
-come only from runtime evidence such as `local-preflight.json` or
-`archive/runtime-versions.json`; unresolved observed values stay `null` rather
+for external tools such as Pier and DeepSWE). These values come only from
+runtime evidence such as `local-preflight.json` or `archive/runtime-versions.json`;
+unresolved observed values stay `null` rather
 than echoing the pin. Evidence outside the run tree is copied under
 `artifacts/external/`. A missing source makes the bundle `partial` and is
 reported; it is never silently omitted. A non-deliverable format is recorded as
 excluded and does not affect completeness. Secret-bearing filenames or contents
-are recorded as skipped and are not copied. `K3-CB` remains in the bundle and
 report as supplementary evidence while `official_row_count` remains the count
 of official rows only.
 
@@ -220,9 +218,9 @@ For Params and Prompt Tokens, which have no official case rerun policy, up to
 three profile-owned batch any-pass waves rerun failed or invalid cases after the
 formal wave. K3 Rows 3..6 currently require 10 rounds each. Row 18 is an official K3
 feature item and runs after the feature group. Required K3 precision acceptance
-runs Rows 7..15 and 17 before the feature group. BEAM Row 16 and extended Kimi
-Code Bench are optional precision suites selected explicitly when needed.
-It uses the committed invalid/truncated toolcall recovery fixtures. Case A
+runs Rows 7..15 and 17 before the feature group. BEAM Row 16 is optional and
+never changes required-row completeness. Row 18 uses the committed
+invalid/truncated toolcall recovery fixtures. Case A
 replays 143 of 157 messages and requires non-empty valid JSON arguments that do
 not repeat the sample forbidden pattern; the official judge does not enforce a
 tool name. Case B replays 19 of 21 messages and accepts `WriteFile` or

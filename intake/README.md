@@ -59,7 +59,7 @@ Validate and audit first, then run the selected rows against the endpoint:
 
 ```bash
 uv run python scripts/validate_intake.py intake/kimi-k3/444
-uv run python scripts/audit_intake.py intake/kimi-k3/444
+uv run python scripts/check-official-coverage.py intake/kimi-k3/444
 
 scripts/kvh --base-url https://<endpoint>/v1 --served-model <model> -- \
   develop --model kimi-k3 --select 6 --select 5 --select 4 --select 18

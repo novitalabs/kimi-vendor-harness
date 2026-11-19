@@ -34,11 +34,11 @@ whose input is the request can run against an endpoint.
 | Request validation | HTTP request | Yes, deterministic (status code) | Port as endpoint cases; most are already in KVV `k3_features`. |
 | Prompt rendering | HTTP request | Yes, via `usage.prompt_tokens` | Port as prompt-token cases. Expected counts must come from the official `encoding_k3.py`, not from vllm-int. KVV row 6 already covers the parity cases (whitespace reasoning, non-object arguments, tool result matching). |
 | Response rules that hold for any output | HTTP request | Yes (no XTML in content, `tool_choice=none` suppresses calls, id continuation, usage fields) | Partly in stream spec and `toolcall_contract`; add the rest there. |
-| Output parsing | Model output tokens | No: an endpoint cannot be made to emit a chosen token sequence | Keep as framework-neutral parse vectors (output tokens → expected API result) run through a small per-framework adapter; endpoint suites only approximate them statistically. |
+| Output parsing | Model output tokens | No: an endpoint cannot be made to emit a chosen token sequence | Keep as framework-neutral parser conformance vectors (output tokens → expected API result) run through a small per-framework adapter; endpoint suites only approximate them statistically. |
 | Grammar construction | Request → grammar | Only statistically (`required` always calls, `strict` conforms) | Covered by Walle, `k3_features`, `toolcall_contract`; do not port grammar internals. |
 
 The `k3_http_*` route tests look end-to-end but inject the engine's output tokens; they belong to the
 "output parsing" row.
 
 Most of the production incidents (truncated markers leaking into content, malformed call headers, undeclared
-tools, marker text inside JSON arguments) are output-parsing cases, so the parse vectors are where the value is.
+tools, marker text inside JSON arguments) are output-parsing cases, so the parser conformance vectors are where the value is.

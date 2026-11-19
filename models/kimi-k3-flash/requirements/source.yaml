@@ -71,10 +71,6 @@ verifier_repository:
     k3_features_collected_cases: 118
     toolcall_reject_cases: 3
 closed_acceptance:
-  kimi_code_bench:
-    status: external
-    result: 68.9 avg@5
-    data_policy: tested party must not save test data
   stress_test:
     status: external
     owner: Moonshot

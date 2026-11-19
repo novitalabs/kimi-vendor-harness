@@ -1,7 +1,7 @@
 """Audit an official-test intake against the model manifest.
 
 Usage:
-    uv run python scripts/audit_intake.py intake/<model>/<revision>
+    "$NVST_HARNESS_PYTHON" scripts/check-official-coverage.py intake/<model>/<revision>
 
 Derives coverage from two sources that the intake file cannot override:
   * the model's composed suites (shared catalog + model manifest): which rows a suite declares;

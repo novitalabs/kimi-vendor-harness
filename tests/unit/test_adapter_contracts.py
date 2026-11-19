@@ -235,25 +235,33 @@ def test_concurrency_override_rewrites_supported_runner_flags(tmp_path: Path) ->
 def test_novita_api_plugin_loads_kvv_fixtures_without_option_conflict(tmp_path: Path) -> None:
     product_root = Path(__file__).resolve().parents[2]
     kvv_root = product_root / "vendor" / "kvv-k3"
+    kvv_python = Path(
+        os.environ.get(
+            "NVST_KVV_PYTHON",
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"),
+        )
+    )
+    if not kvv_python.exists():
+        pytest.skip("KVV pack is not installed; run scripts/setup-pack.sh core")
     nodeid = (
         "suites/novita-api/tests/streaming/test_stream_spec.py::"
         "test_stream_spec_n_gt_1"
     )
     process = subprocess.run(
         [
-            str(kvv_root / ".venv/bin/python"),
+            str(kvv_python),
             "-m",
             "pytest",
             "-p",
             "pytest_artifacts",
             nodeid,
             "--collect-only",
-            "--artifact-dir",
-            str(tmp_path / "artifacts"),
+            f"--artifact-dir={tmp_path / 'artifacts'}",
         ],
         cwd=product_root,
         env={
             **os.environ,
+            "NVST_KVV_PYTHON": str(kvv_python),
             "PYTHONPATH": f"{product_root / 'suites/novita-api'}:{kvv_root}",
         },
         capture_output=True,
@@ -345,8 +353,15 @@ def test_header_merge_preserves_existing_and_applies_service_override() -> None:
 
 def test_pytest_header_plugin_injects_httpx_headers(tmp_path: Path) -> None:
     product_root = Path(__file__).resolve().parents[2]
-    kvv_python = Path(os.environ.get("NVST_KVV_PYTHON", str(product_root / "vendor/kvv-k3/.venv/bin/python")))
+    kvv_python = Path(
+        os.environ.get(
+            "NVST_KVV_PYTHON",
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"),
+        )
+    )
     test_file = tmp_path / "test_headers.py"
+    if not kvv_python.exists():
+        pytest.skip("KVV pack is not installed; run scripts/setup-pack.sh core")
     test_file.write_text(
         "import httpx\n"
         "from openai import OpenAI\n"
@@ -914,9 +929,14 @@ def test_pytest_records_nodeids_selectable_from_suite_cwd(tmp_path: Path, monkey
     adapter's command lets pytest pick this repository as rootdir (instead of vendor/kvv-k3), the
     ids gain a ``vendor/kvv-k3/`` prefix and every rerun silently collects zero tests."""
     root = Path(__file__).resolve().parents[2]
-    python = Path(os.environ.get("NVST_KVV_PYTHON", str(root / "vendor/kvv-k3/.venv/bin/python")))
+    python = Path(
+        os.environ.get(
+            "NVST_KVV_PYTHON",
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"),
+        )
+    )
     if not python.exists():
-        pytest.skip("vendor/kvv-k3 environment not synced (uv sync)")
+        pytest.skip("KVV pack is not installed; run scripts/setup-pack.sh core")
     monkeypatch.setenv("NVST_KVV_PYTHON", str(python))
     from novita_self_test.config import ModelProfile
 
@@ -1697,57 +1717,6 @@ def test_inspect_adapter_rejects_exhausted_engine_overload_error(
     assert result.coverage["observed_invalid_finish_reason_sample_ids"] == [
         "overloaded"
     ]
-
-
-def test_code_bench_finalize_only_repairs_crashed_finalize(tmp_path: Path, monkeypatch) -> None:
-    for key, value in {"NVST_CODE_BENCH_HOST": "host.test", "NVST_CODE_BENCH_WORKDIR_ROOT": "/tmp/kbench", "NVST_CODE_BENCH_CACHE_ROOT": "/tmp/.kbench-cache", "NVST_CODE_BENCH_CONTAINER_PROXY": "http://proxy.test:1080", "NVST_DEEPSWE_ROOT": "/srv/kvh/deepswe", "NVST_PIER_BIN": "/srv/kvh/venvs/pier/bin/pier"}.items():
-        monkeypatch.setenv(key, value)
-    product_root = Path(__file__).resolve().parents[2]
-    ctx = context(tmp_path, "code_bench", {"run_contract": "contract.json"})
-    ctx = replace(ctx, repository_root=product_root)
-    adapter = adapter_for("code_bench", runner=FakeRunner())
-
-    command = adapter.build_command(ctx)
-    assert "--finalize-only" not in command
-
-    ctx.suite_dir.mkdir(parents=True, exist_ok=True)
-    (ctx.suite_dir / "config.snapshot.json").write_text("{}", encoding="utf-8")
-    (ctx.suite_dir / "archive").mkdir(exist_ok=True)
-    repair = adapter.build_command(ctx)
-    assert "--finalize-only" in repair
-    contract = repair[repair.index("--contract") + 1]
-    assert contract == str(ctx.suite_dir / "code-bench-run-contract.json")
-
-
-def test_code_bench_and_deepswe_commands_use_owned_wrappers(tmp_path: Path, monkeypatch) -> None:
-    for key, value in {"NVST_CODE_BENCH_HOST": "host.test", "NVST_CODE_BENCH_WORKDIR_ROOT": "/tmp/kbench", "NVST_CODE_BENCH_CACHE_ROOT": "/tmp/.kbench-cache", "NVST_CODE_BENCH_CONTAINER_PROXY": "http://proxy.test:1080", "NVST_DEEPSWE_ROOT": "/srv/kvh/deepswe", "NVST_PIER_BIN": "/srv/kvh/venvs/pier/bin/pier"}.items():
-        monkeypatch.setenv(key, value)
-    code = context(
-        tmp_path,
-        "code_bench",
-        {"run_contract": "contract.json"},
-    )
-    product_root = Path(__file__).resolve().parents[2]
-    code = replace(code, repository_root=product_root)
-    code_command = adapter_for("code_bench", runner=FakeRunner()).build_command(code)
-    assert code_command[1:3] == ["-m", "novita_self_test.adapters.codebench_run"]
-    contract = code.suite_dir / "code-bench-run-contract.json"
-    assert contract.is_file()
-    validation = subprocess.run(
-        [str(product_root / "suites/kimi-code-bench/scripts/validate-run-contract.sh"), str(contract)],
-        cwd=product_root / "suites/kimi-code-bench",
-        capture_output=True,
-        text=True,
-    )
-    assert validation.returncode == 0, validation.stderr
-
-    deep = context(tmp_path, "deepswe", dict(DEEPSWE_PINS))
-    deep_command = adapter_for("deepswe", runner=FakeRunner()).build_command(deep)
-    assert deep_command[1:3] == ["-m", "novita_self_test.adapters.deepswe_remote"]
-    assert "--transport" not in deep_command
-    assert deep_command[deep_command.index("--runtime-root") + 1] == "/srv/kvh/deepswe"
-    assert deep_command[deep_command.index("--expected-pier-version") + 1] == "0.3.1"
-    assert deep_command[deep_command.index("--expected-tasks") + 1] == "113"
 
 
 def test_deepswe_pier_uses_a_proxy_free_docker_client_config(tmp_path: Path) -> None:
@@ -2869,7 +2838,7 @@ def test_beam_runner_rejects_invalid_generations_before_judging(
 
 
 def test_host_settings_override_runtime_locations(tmp_path: Path, monkeypatch) -> None:
-    """Where DeepSWE and Code Bench run is a property of the host, not of the shared test set."""
+    """Where DeepSWE runs is a property of the host, not of the shared test set."""
     monkeypatch.setenv("TEST_VENDOR_API_KEY", "runtime-only-secret")
     deep = context(tmp_path, "deepswe", dict(DEEPSWE_PINS))
     default = adapter_for("deepswe", runner=FakeRunner()).build_command(deep)

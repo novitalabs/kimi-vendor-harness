@@ -9,10 +9,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_setup_pack_is_shell_valid_and_does_not_use_repo_venv() -> None:
     script = (ROOT / "scripts/setup-pack.sh").read_text(encoding="utf-8")
-    assert "uv sync" not in script
+    assert "UV_PROJECT_ENVIRONMENT" in script
     assert "NVST_VENV_ROOT" in script
     assert "NVST_KVV_VENV" in script
     assert "NVST_HARNESS_VENV" in script
+    assert "--locked" in script
 
 
 def test_check_packs_reports_missing_optional_external_hosts(tmp_path: Path) -> None:
@@ -30,4 +31,3 @@ def test_check_packs_reports_missing_optional_external_hosts(tmp_path: Path) -> 
     assert result.returncode != 0
     assert "BLOCKED" in result.stdout
     assert "NVST_DEEPSWE_ROOT" in result.stdout
-    assert "NVST_CODE_BENCH_HOST" in result.stdout

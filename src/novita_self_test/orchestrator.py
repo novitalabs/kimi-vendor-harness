@@ -23,6 +23,7 @@ from .config import (
     ModelProfile,
     ServiceAccess,
     SuiteDefinition,
+    results_root,
     workspace_root,
 )
 from .diagnosis import write_diagnosis
@@ -827,7 +828,7 @@ class Orchestrator:
             ]
         judge = _judge_access_for_plan(plan, judge_access_path)
 
-        run_dir = (run_dir or self.root / "runs" / model_id / _run_id()).resolve()
+        run_dir = (run_dir or results_root(self.root) / model_id / _run_id()).resolve()
         run_dir.mkdir(parents=True, exist_ok=False)
         states = [
             _state(f"{index:03d}-{suite.suite_id}", suite, selected=True)

@@ -11,11 +11,8 @@ operator intent without creating a second matrix.
 | --- | --- | --- | --- |
 | `feature` | `1.0`-`6`, `18` | Fast feedback on API, streaming, multimodal, tool-call, parameter, and token contracts | Exact case/count/artifact completeness; no benchmark average |
 | `precision` | `7`-`15`, `17` | Required long-running quality measurement across large datasets or coding tasks | Complete denominator plus score and profile-owned threshold/observation comparison |
-| `optional_precision` | `16`, `K3-CB` | Optional BEAM and extended Kimi Code Bench evidence selected only when the operator wants the additional gate | Complete result is reported separately and does not gate the default required acceptance plan |
 
-Every K3 suite declares `test_class` in the manifest. A suite must belong to
-exactly one class. BEAM and K3-CB remain explicitly selectable optional suites;
-they are not included in the default required acceptance modes.
+Every K3 suite declares `test_class` in the manifest. A suite must belong to exactly one class. Optional BEAM is not included in the default required acceptance modes.
 
 ## Feature Tests
 
@@ -57,7 +54,6 @@ Feature rules:
 | `15` | `inspect-mmmu-max` | KVV MMMU Pro at max effort. |
 | `16` | `beam-1m` | Optional: generate the 1M BEAM answers, retry invalid task outputs under the runner contract, then judge and finalize without further vendor traffic. |
 | `17` | `deepswe` | Run the pinned local DeepSWE runtime over 113 tasks; complete the required rounds, checkpoints, task locks, and preflight evidence. |
-| `K3-CB` | `kimi-code-bench` | Optional: run the extended 89-task Kimi Code Bench set with the committed runner and recovery policy. |
 
 Precision rules:
 
@@ -68,15 +64,13 @@ Precision rules:
 - Inspect rows use the profile's one-sided lower-bound tolerance; a higher
   score does not fail. BEAM and DeepSWE use their own profile-owned result
   contracts.
-- Code Bench publishes one best-observed result for the selected run/session;
-  comparison artifacts are not current acceptance evidence.
+
 
 ## Acceptance Usage
 
 The existing `simple` and `full` modes preserve their production sequencing.
 `--acceptance precision-core` is the scoped required precision run: Rows 7..9
 (toolcall thinking effort) plus DeepSWE (Row 17, three rounds). BEAM (Row 16)
-and K3-CB are optional explicit add-ons. It is not a full acceptance; unselected
 rows stay `not_run` and the verdict only covers the selected required rows.
 
 `--acceptance k3-sop` is the Moonshot pre-launch gate from the pinned K3 上线
@@ -91,8 +85,8 @@ SOP (revision 9). Its executable order is:
 7. Row `4`: tool-call JSON schema.
 8. Rows `1.0` and `1.1`: Streaming P0 and P1.
 9. Vendor-owned coverage: Row `2` Image, Row `17` DeepSWE,
-   Row `18` tool-call arguments recovery. Row `16` BEAM and extended Kimi Code
-   Bench are optional explicit suites.
+   Row `18` tool-call arguments recovery. Row `16` BEAM is an optional explicit
+   suite.
 
 Streaming P2 (`1.2`) is intentionally not part of `k3-sop`; it remains in the
 full profile acceptance. The SOP run includes all long-test coverage and three
@@ -111,10 +105,8 @@ the overall verdict and completeness summary, then inspect the numbered suite
 directory for the parameters, normalized result, and task/case/evidence index.
 Each `suite-manifest.json` additionally records the effective `parameters`
 index and the expected/observed `dependencies` (runner, repository commits, and
-external runtime versions such as Harbor/Terminal Bench 2/Kimi CLI/uv for Code
-Bench and Pier/DeepSWE/Kimi Code for row 17).
-The bundle keeps required rows and optional BEAM/Code Bench results separate;
-optional suites never change the required row count or default acceptance verdict.
+external runtime versions such as Pier and DeepSWE for row 17).
+Optional BEAM never changes the required row count or default acceptance verdict.
 
 The optional BEAM fixture is sourced from the vendored `vendor/kvv-k3/beam/data/` snapshot. Its public
 source, converter, counts, and file hashes are recorded in `docs/beam-1m-provenance.json`; the old

@@ -49,7 +49,11 @@ def _format_tokens(tokens: list[Any], context: AdapterContext) -> list[str]:
         "repository_root": str(context.repository_root.resolve()),
         "kvv_python": os.environ.get(
             "NVST_KVV_PYTHON",
-            str((context.repository_root / "vendor/kvv-k3/.venv/bin/python").resolve()),
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"),
+        ),
+        "harness_python": os.environ.get(
+            "NVST_HARNESS_PYTHON",
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/harness/bin/python"),
         ),
     }
     return [str(token).format_map(values) for token in tokens]
@@ -1523,156 +1527,6 @@ class InspectAdapter(CommandAdapter):
         return result
 
 
-class CodeBenchAdapter(CommandAdapter):
-    @staticmethod
-    def _crashed_finalize_state(suite_dir: Path) -> bool:
-        return (
-            (suite_dir / "config.snapshot.json").is_file()
-            and (suite_dir / "archive").is_dir()
-            and not (suite_dir / "finalization-manifest.json").is_file()
-        )
-
-    def _materialize_contract(self, context: AdapterContext, mode: str) -> Path:
-        source = (
-            context.repository_root
-            / "suites"
-            / "kimi-code-bench"
-            / "examples"
-            / "run-contract.example.json"
-        )
-        try:
-            contract = json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ConfigError(
-                "runner_contract_invalid",
-                f"cannot load Code Bench contract example: {exc}",
-            ) from exc
-        count = 15 if mode == "smoke" else 89
-        tag = context.run_dir.name.lower()
-        evidence_dir = str(context.suite_dir.resolve())
-        contract["run"].update(
-            {
-                "tag": tag,
-                "selected_task_count": count,
-                "fixed_denominator": count,
-                "required_trial_count": count * 3,
-                "evidence_dir": evidence_dir,
-                "status_path": f"{evidence_dir}/status.json",
-                "detached": False,
-                "concurrency": count,
-            }
-        )
-        contract["task_selection"] = {
-            "kind": "builtin",
-            "value": mode,
-            "expected_count": count,
-        }
-        contract["execution_profile"].update(
-            {
-                "concurrency": count,
-                "schedule": "task_pipelines",
-                "concurrency_scope": "task_count",
-                "recovery": {"enabled": True, "attempts_per_abnormal_task": 1},
-            }
-        )
-        contract["service"] = {
-            "base_url": context.service.base_url,
-            "model": context.service.served_model,
-            "headers": context.service.headers,
-            "preserve_thinking": True,
-        }
-        contract["authentication"] = {
-            "kind": "env",
-            "env_name": context.service.api_key_env,
-        }
-        remote = context.suite.config.get("remote") or {}
-        contract["remote"] = {
-            "host": required_host_setting("host", remote.get("host")),
-            "port": int(remote.get("port", 22)),
-            "workdir": str(
-                required_host_setting("workdir_root", remote.get("workdir_root"))
-            ).rstrip("/")
-            + f"/{tag}",
-            "container_proxy": str(
-                required_host_setting("container_proxy", remote.get("container_proxy"))
-            ),
-            "runtime_cache_root": str(
-                required_host_setting("runtime_cache_root", remote.get("runtime_cache_root"))
-            ),
-        }
-        path = context.suite_dir / "code-bench-run-contract.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(contract, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        return path
-
-    def build_command(self, context: AdapterContext) -> list[str]:
-        mode = (
-            context.selector.split(":", 1)[1]
-            if context.selector and ":" in context.selector
-            else "extended"
-        )
-        expected_concurrency = 15 if mode == "smoke" else 89
-        if context.concurrency_override not in (None, expected_concurrency):
-            raise ValueError(
-                "Code Bench concurrency is fixed to the selected task count "
-                f"({expected_concurrency})"
-            )
-        if self._crashed_finalize_state(context.suite_dir):
-            # A previous attempt completed run/fetch and then crashed in the
-            # local finalize step. Repair it in place with the original
-            # materialized contract and without new traffic.
-            contract = context.suite_dir / "code-bench-run-contract.json"
-            if not contract.is_file():
-                raise ConfigError(
-                    "runner_contract_invalid",
-                    "finalize repair requires the original materialized contract",
-                )
-        else:
-            contract = self._materialize_contract(context, mode)
-        command = [
-            sys.executable,
-            "-m",
-            "novita_self_test.adapters.codebench_run",
-            "--contract",
-            str(contract),
-            "--run-dir",
-            str(context.suite_dir.resolve()),
-        ]
-        if self._crashed_finalize_state(context.suite_dir):
-            command.append("--finalize-only")
-        minimum = context.suite.config.get("min_score")
-        if minimum is not None:
-            command.extend(["--min-score", str(minimum)])
-        return command
-
-
-def _reread_beam_judge_result(context: AdapterContext, result: SuiteResult) -> SuiteResult:
-    """Re-read the judge phase's own adapter-result.json after a detached wait."""
-    final_path = context.suite_dir / "adapter-result.json"
-    try:
-        payload = json.loads(final_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        result.status = "failed"
-        result.validity = "execution_invalid"
-        result.reason = "beam_judge_result_missing"
-        result.failure_summary = f"background BEAM judge did not produce a valid result: {exc}"
-        return result
-    payload["suite_id"] = context.suite.suite_id
-    payload["row_ids"] = list(context.suite.row_ids)
-    payload["artifact_paths"] = list(
-        dict.fromkeys(
-            list(payload.get("artifact_paths") or []) + result.artifact_paths + [str(final_path.resolve())]
-        )
-    )
-    payload["runner_fingerprint"] = {
-        **result.runner_fingerprint,
-        **dict(payload.get("runner_fingerprint") or {}),
-    }
-    return SuiteResult.from_dict(payload)
-
-
 class BeamAdapter(CommandAdapter):
     def __init__(self, runner: ProcessRunner | None = None) -> None:
         super().__init__(runner=runner)
@@ -2085,7 +1939,6 @@ ADAPTERS: dict[str, type[Adapter]] = {
     "replay": ReplayAdapter,
     "inspect": InspectAdapter,
     "beam": BeamAdapter,
-    "code_bench": CodeBenchAdapter,
     "deepswe": DeepSWEAdapter,
     "stress": CommandAdapter,
 }

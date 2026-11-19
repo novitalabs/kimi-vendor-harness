@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VECTORS = ROOT / "suites/novita-api/tests/parse_contract_vectors.jsonl"
+DEFAULT_VECTORS = ROOT / "suites/novita-api/tests/k3-parser-conformance.jsonl"
 REQUIRED_EXPECTED = {"reasoning", "content", "tool_calls"}
 
 
@@ -93,7 +93,7 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    print(f"{len(vectors)} parse vectors valid: {args.vectors}")
+    print(f"{len(vectors)} parser conformance vectors valid: {args.vectors}")
     return 0
 
 

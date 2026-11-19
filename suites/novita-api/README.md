@@ -10,7 +10,8 @@ collection or suite development:
 ```bash
 export KVV_ROOT="$(cd ../../vendor/kvv-k3 && pwd)"
 export PYTHONPATH="$PWD:$KVV_ROOT"
-"$KVV_ROOT/.venv/bin/python" -m pytest --collect-only -q tests
+export NVST_KVV_PYTHON="${NVST_KVV_PYTHON:-$HOME/.cache/novita-kimi-vendor/venvs/kvv-k3/bin/python}"
+"$NVST_KVV_PYTHON" -m pytest --collect-only -q tests
 ```
 
 Do not add endpoint-specific preflight scripts, dynamic endpoints, or literal

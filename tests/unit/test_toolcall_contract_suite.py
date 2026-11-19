@@ -16,11 +16,16 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PYTHON = Path(os.environ.get("NVST_KVV_PYTHON", str(ROOT / "vendor/kvv-k3/.venv/bin/python")))
+PYTHON = Path(
+    os.environ.get(
+        "NVST_KVV_PYTHON",
+        str(Path.home() / ".cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"),
+    )
+)
 SUITE = "suites/novita-api/tests/toolcall_contract"
 FAKE = ROOT / "tests/support/fake_k3_server.py"
 
-pytestmark = pytest.mark.skipif(not PYTHON.exists(), reason="vendor/kvv-k3 environment not synced (uv sync)")
+pytestmark = pytest.mark.skipif(not PYTHON.exists(), reason="KVV pack is not installed; run scripts/setup-pack.sh core")
 
 # fault -> test functions that must fail (and nothing else may fail)
 EXPECTED = {

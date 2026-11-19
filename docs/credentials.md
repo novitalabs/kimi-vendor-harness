@@ -16,12 +16,12 @@ Register an endpoint once (token is read from stdin, not argv):
 
 ```bash
 read -r -s AUTH   # paste: Authorization: Bearer <token>
-printf '%s' "$AUTH" | uv run python scripts/nvst_credentials.py set \
+printf '%s' "$AUTH" | "$NVST_HARNESS_PYTHON" scripts/nvst_credentials.py set \
   --name my-endpoint --role endpoint --exact-host my-endpoint.example.com
 unset AUTH
 
-uv run python scripts/nvst_credentials.py list    # redacted fingerprints only
-uv run python scripts/nvst_credentials.py remove --name my-endpoint
+"$NVST_HARNESS_PYTHON" scripts/nvst_credentials.py list    # redacted fingerprints only
+"$NVST_HARNESS_PYTHON" scripts/nvst_credentials.py remove --name my-endpoint
 ```
 
 Matching: exact host beats longest host suffix (`--host-suffix`), then longest

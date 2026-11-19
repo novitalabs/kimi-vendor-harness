@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .config import ConfigError, ModelProfile
+from .config import ConfigError, ModelProfile, results_root
 from .collection import write_collection
 from .doctor import run_doctor
 from .orchestrator import Orchestrator, UserInterrupted
@@ -354,7 +354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_code = 0
         elif args.command == "collect":
             repository_root = Path(__file__).resolve().parents[2]
-            runs_root = args.runs_root or (repository_root / "runs")
+            runs_root = args.runs_root or results_root(repository_root)
             out_dir = args.out or (runs_root / "index")
             index = write_collection(
                 runs_root,

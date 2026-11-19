@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Install one optional dependency pack into user-owned paths.
-# Usage: scripts/setup-pack.sh core | vision | deepswe | codebench | all
+# Usage: scripts/setup-pack.sh core | vision | deepswe | all
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pack="${1:-}"
 case "$pack" in
-  core|vision|deepswe|codebench|all) ;;
-  *) echo "usage: $0 {core|vision|deepswe|codebench|all}" >&2; exit 2 ;;
+  core|vision|deepswe|all) ;;
+  *) echo "usage: $0 {core|vision|deepswe|all}" >&2; exit 2 ;;
 esac
 
 # Nothing is installed into the repository and no endpoint traffic is generated.
@@ -19,10 +19,10 @@ mkdir -p "$venv_root" "$hf_home"
 export HF_HOME="$hf_home"
 
 if [[ "$pack" == core || "$pack" == vision || "$pack" == all ]]; then
-  uv venv "$harness_venv" --python 3.12
-  uv pip install --python "$harness_venv/bin/python" -e "$root"
-  uv venv "$kvv_venv" --python 3.12
-  uv pip install --python "$kvv_venv/bin/python" -e "$root/vendor/kvv-k3"
+  uv venv "$harness_venv" --python 3.12 --allow-existing
+  UV_PROJECT_ENVIRONMENT="$harness_venv" uv sync --locked --project "$root"
+  uv venv "$kvv_venv" --python 3.12 --allow-existing
+  UV_PROJECT_ENVIRONMENT="$kvv_venv" uv sync --locked --project "$root/vendor/kvv-k3"
   cat <<EOF
 Core pack ready. Export these in each new shell:
   export NVST_HARNESS_PYTHON="$harness_venv/bin/python"
@@ -31,7 +31,6 @@ Core pack ready. Export these in each new shell:
 EOF
 fi
 if [[ "$pack" == vision || "$pack" == all ]]; then
-  uv pip install --python "$kvv_venv/bin/python" -e "$root/vendor/kvv-k3"
   echo "vision pack ready; datasets download lazily under HF_HOME=$HF_HOME"
 fi
 if [[ "$pack" == deepswe || "$pack" == all ]]; then
@@ -41,18 +40,6 @@ Prepare your own pinned DeepSWE/Pier installation, then export:
   NVST_DEEPSWE_ROOT=/path/to/runtime-root
   NVST_PIER_BIN=/path/to/pier
 The committed profile checks the DeepSWE commit, Pier version, and 113-task inventory.
-EOF
-fi
-if [[ "$pack" == codebench || "$pack" == all ]]; then
-  cat <<'EOF'
-Code Bench is an external host pack and is intentionally not installed implicitly.
-Prepare your own Docker/SSH host and export:
-  NVST_CODE_BENCH_HOST
-  NVST_CODE_BENCH_WORKDIR_ROOT
-  NVST_CODE_BENCH_CACHE_ROOT
-  NVST_CODE_BENCH_CONTAINER_PROXY
-The committed runner release gate remains local and can be checked with:
-  (cd suites/kimi-code-bench && ./scripts/validate-release.sh)
 EOF
 fi
 printf 'pack=%s ready\n' "$pack"

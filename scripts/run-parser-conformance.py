@@ -14,8 +14,8 @@ Adapter result:
    [{"name": str, "index": int, "arguments": str}]}
 
 Usage:
-  uv run python scripts/run_parse_vectors.py --adapter 'python adapter.py' \
-      --vectors suites/novita-api/tests/parse_contract_vectors.jsonl
+  "$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py --adapter 'python adapter.py' \
+      --vectors suites/novita-api/tests/k3-parser-conformance.jsonl
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VECTORS = ROOT / "suites/novita-api/tests/parse_contract_vectors.jsonl"
+DEFAULT_VECTORS = ROOT / "suites/novita-api/tests/k3-parser-conformance.jsonl"
 
 
 def norm(value: dict[str, Any]) -> dict[str, Any]:
@@ -49,11 +49,10 @@ def norm(value: dict[str, Any]) -> dict[str, Any]:
 
 def run(vectors: Path, adapter: str) -> int:
     try:
-        from validate_parse_vectors import load_vectors
-
+        from parser_conformance_lib import load_vectors
         cases = load_vectors(vectors)
     except (ImportError, OSError, ValueError) as exc:
-        print(f"cannot load parse vectors: {exc}", file=sys.stderr)
+        print(f"cannot load parser conformance vectors: {exc}", file=sys.stderr)
         return 2
     try:
         process = subprocess.Popen(
@@ -124,7 +123,7 @@ def main() -> int:
     try:
         return run(args.vectors, args.adapter)
     except OSError as exc:
-        print(f"parse vector I/O failed: {exc}", file=sys.stderr)
+        print(f"parser conformance vector I/O failed: {exc}", file=sys.stderr)
         return 2
 
 

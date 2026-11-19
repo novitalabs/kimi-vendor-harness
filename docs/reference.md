@@ -4,38 +4,19 @@ Detailed contracts behind `nvst`. Start with the top-level `README.md`.
 
 `novita-self-test` is the single multi-model entrypoint for Kimi vendor
 development diagnostics and formal acceptance. It executes official KVV from
-`vendor/` and owns Novita API tests, Code Bench, deepSWE integration,
 profiles, orchestration, artifact contracts, and reporting.
 
 ## Quick start
 
 ```bash
-uv sync
-uv run nvst list --model kimi-k3
-uv run nvst doctor --model kimi-k3 \
-  --service-access cases/service-access.json \
-  --judge-access cases/judge-access.json
-# Explicit bounded endpoint/judge traffic and host/Docker canaries.
-uv run nvst doctor --model kimi-k3 \
-  --service-access cases/service-access.json \
-  --judge-access cases/judge-access.json --online-canary
-uv run nvst develop --model kimi-k3 \
-  --service-access cases/service-access.json --select 1.0
-uv run nvst develop --model kimi-k3 \
-  --service-access cases/service-access.json \
-  --select 7 --select 8 --select 9
-uv run nvst accept --model kimi-k3 \
-  --service-access cases/service-access.json \
-  --judge-access cases/judge-access.json --acceptance simple
-uv run nvst accept --model kimi-k3 \
-  --service-access cases/service-access.json \
-  --judge-access cases/judge-access.json --acceptance full
-uv run nvst accept --model kimi-k3 \
-  --service-access cases/service-access.json \
-  --judge-access cases/judge-access.json --acceptance k3-sop
-# Development-only scenario override
-uv run nvst develop --model kimi-k3 --service-access cases/service-access.json \
-  --select 17 --concurrency 50
+scripts/setup-pack.sh core
+export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python"
+export NVST_KVV_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"
+export NVST_BIN="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/nvst"
+"$NVST_BIN" list --model kimi-k3
+scripts/kvh --base-url "$URL" --served-model "$MODEL" -- doctor --model kimi-k3
+# Optional: keep run evidence outside the checkout.
+export NVST_RESULTS_ROOT="$HOME/.cache/novita-kimi-vendor/runs"
 ```
 
 `kimi-k3` is pinned to
@@ -49,11 +30,10 @@ shared `MoonshotAI/kvv-k3` `k3` checkout at commit
 `6ec0eaad1ca98933327cf571c0d8b78ab8476551`, including its Git LFS fixtures.
 The same K3-family admission library is shared by Kimi K3, Kimi K3 Flash, and
 Kimi K3.1; it is vendored at `vendor/kvv-k3`. K3 and Flash
-KVV-derived suites execute from that snapshot. The shared source inventory is 19 Params, 428
-Walle, 118 K3-feature, 74 prompt-token, and 71 stable2 toolcall samples (355
-trials across five epochs). Flash runs rows 1.0/1.1 and 2..10: the three
-benchmark families are max-only, BEAM is excluded, and Kimi Code Bench/Moonshot
-stress tests remain external closed acceptance gates.
+KVV-derived suites execute from that snapshot. The shared source inventory is 19 Params, 428 Walle, 118 K3-feature, 74
+prompt-token, and 71 stable2 toolcall samples (355 trials across five epochs).
+Flash runs rows 1.0/1.1 and 2..10: the three benchmark families are max-only,
+and Moonshot-owned stress testing remains an external gate.
 
 K3 Stream p0/p1/p2 use the exact self-validation file embedded in Moonshot's
 `Streaming Output Spec List for Vendor` Docx revision 244. The file is the
@@ -64,21 +44,19 @@ vendor responses score zero, while endpoint and judge request errors remain
 execution-invalid. deepSWE verifies the local source commit, clean tracked worktree,
 Pier version, and 113-task inventory before staging or execution. It runs only
 on a host with the prepared DeepSWE runtime (`transport: local`). The legacy K2.x replay suite is not part of the K3 test set.
-K3 full acceptance runs required precision rows 7..15 and 17; extended Kimi
-Code Bench and BEAM are optional explicit suites and are not automatically run.
+K3 full acceptance runs required precision rows 7..15 and 17; BEAM are optional explicit suites and are not automatically run.
 
 `--acceptance k3-sop` is the pre-launch gate defined by Moonshot's K3 上线 SOP
 (Docx revision 9). It runs the required checks in the SOP order: tool-call
 thinking effort, OCRBench, MMMU Pro, K3 features, prompt tokens, Params,
 tool-call JSON schema, Streaming P0/P1, and the current Novita-owned required
-coverage (Image, DeepSWE, Row 18). BEAM and extended Kimi Code Bench are optional
+coverage (Image, DeepSWE, Row 18). BEAM and external gates are optional
 explicit add-ons. It deliberately excludes Streaming P2 because the SOP names
 P0 and P1. All selected suites remain fail-fast and a passed run is the test
 gate before the separate 10% -> 30% -> 100% rollout process.
 
 K3 suites are classified into required feature tests (Rows 1.0-6 and 18),
 required precision tests (Rows 7-15 and 17), and optional precision suites
-(Row 16 BEAM and K3-CB). Feature tests are bounded contract checks intended
 for fast feedback; precision tests are benchmark-style runs with larger sample
 sets, score thresholds, and longer execution time. See
 [`docs/k3-test-catalog.md`](docs/k3-test-catalog.md) for the row-by-row contract.
@@ -110,13 +88,15 @@ behavior failure. Any suite marked `failed` stops the current simple, full, or
 develop plan immediately; later suites are recorded as blocked/not-run evidence.
 
 K3 exposes three profile-owned scopes. Precision tests run before feature tests.
-The official precision group is Rows 7..17; the extended Kimi Code Bench suite
-is supplementary precision evidence. The feature group is Rows 1.0/1.1/1.2
-through 6 plus Row 18. `--acceptance simple`
-runs OCRBench rows 10..12, BEAM row 16, one DeepSWE round, then the feature
-group. `--acceptance full` runs all precision rows and extended Kimi Code Bench,
-then the complete feature group; DeepSWE uses three rounds. `develop` keeps
-explicit `--select` selectors and uses one DeepSWE round when row 17 is selected.
+The official precision group is Rows 7..17; Moonshot-owned external gates are
+tracked as handoff requirements, not local suites. The feature group is Rows
+1.0/1.1/1.2 through 6 plus Row 18. `--acceptance simple` runs OCRBench rows
+10..12, BEAM row 16, one DeepSWE round, then the feature group. `--acceptance
+full` runs all local precision rows, then the complete feature group; DeepSWE
+uses three rounds. `develop` keeps explicit `--select` selectors, uses one pass for rows that
+declare `develop_repeat: 1`, and uses one DeepSWE round when row 17 is selected.
+Start with one selector; rows 4, 5, and 6 still contain 408, 126, and 59 cases
+in their single development pass.
 
 Every suite directory contains `suite-input.json` alongside
 `suite-result.json`. DeepSWE additionally writes `task-results.jsonl`, Pier
@@ -130,9 +110,8 @@ numbered suite directory under it contains the non-secret suite inputs, the
 normalized result, a `suite-manifest.json`, and copied task/case/evidence files;
 evidence outside the run directory is placed under `artifacts/external/`.
 The suite manifest also indexes the effective parameters and the expected
-versus observed versions/commits of external dependencies (for example Harbor,
-Terminal Bench 2, Kimi CLI, Pier, DeepSWE, and the Code Bench runner), with
-unresolved observed values left explicit rather than invented from pins.
+versus observed versions and commits of external dependencies. Unresolved
+observed values stay explicit rather than being invented from pins.
 Missing files and intentionally skipped secret-bearing files remain visible in
 the manifests, while credential material is never copied. Evidence copying is
 allowlisted to readable structured formats (`.json`, `.jsonl`, `.log`, `.md`,
@@ -143,12 +122,12 @@ states the observed `served_model` and the run `started_at`, because one profile
 family can front several deployments. This directory can be handed to an
 acceptance reviewer without requiring the live run tree.
 
-`nvst collect` consolidates committed runs along that model × time axis:
+`collect` consolidates committed runs along that model × time axis:
 
 ```bash
-nvst collect --model kimi-k3                          # index.json + index.md
-nvst collect --model kimi-k3 --served-model moonshotai/kimi-k3-h
-nvst collect --model kimi-k3 --copy-bundles --out package/  # stage the bundles
+"$NVST_BIN" collect --model kimi-k3                          # index.json + index.md
+"$NVST_BIN" collect --model kimi-k3 --served-model moonshotai/kimi-k3-h
+"$NVST_BIN" collect --model kimi-k3 --copy-bundles --out package/  # stage bundles
 ```
 
 It groups runs by the observed served model, orders them by start time, and
@@ -192,9 +171,9 @@ retry waves beginning after the round's formal work completes. Docker keeps
 `192.168.0.0/16`, and passed a 410-network capacity probe.
 
 K3 rows 7-9 run the same pinned 113-sample toolcall format benchmark with
-thinking effort low, high, and max. Rows 10-12 are OCRBench, rows 13-15 are MMMU Pro, row 16 is BEAM, row 17 is
-DeepSWE, and row 18 is official toolcall-arguments recovery. BEAM terminal
-completions
+thinking effort low, high, and max. Rows 10-12 are OCRBench, rows 13-15 are
+MMMU Pro, row 16 is BEAM, row 17 is DeepSWE, and row 18 is official
+tool-call arguments recovery. BEAM terminal completions
 with empty public content are valid model outputs scored as zero; request errors
 remain execution-invalid. Judge traffic is globally rate-limited by the profile,
 records only numeric scores as completed checkpoints, and resumes without
@@ -209,13 +188,13 @@ When an explicitly approved contract migration occurs mid-acceptance, an
 acceptance session can merge only hash-compatible suite evidence:
 
 ```bash
-nvst session create --model kimi-k3 --service-access service-access.json \
+"$NVST_BIN" session create --model kimi-k3 --service-access service-access.json \
   --judge-access judge-access.json \
-  --run runs/kimi-k3/<run-a> --run runs/kimi-k3/<run-b> \
+  --run "$NVST_RESULTS_ROOT/kimi-k3/<run-a>" --run "$NVST_RESULTS_ROOT/kimi-k3/<run-b>" \
   --approval contract-approval.json
-nvst session continue --session runs/kimi-k3/sessions/<session-id> \
-  --run runs/kimi-k3/<replacement-run>
-nvst session report --session runs/kimi-k3/sessions/<session-id>
+"$NVST_BIN" session continue --session "$NVST_RESULTS_ROOT/kimi-k3/sessions/<session-id>" \
+  --run "$NVST_RESULTS_ROOT/kimi-k3/<replacement-run>"
+"$NVST_BIN" session report --session "$NVST_RESULTS_ROOT/kimi-k3/sessions/<session-id>"
 ```
 
 Reuse requires the same service-access hash and requirements revision plus the
@@ -233,7 +212,6 @@ single selected attempt for each suite. Final verdicts distinguish `passed`,
 src/novita_self_test/       CLI, orchestration, stability classification and adapters
 models/                      profile + source/rows snapshot + suite manifest
 suites/novita-api/           imported Novita endpoint tests and fixtures
-suites/kimi-code-bench/      vendored Code Bench suite
 suites/deepswe/              Kimi Code Pier adapter and wrapper
 schemas/                     service, run, and suite-result JSON schemas
 runs/                        ignored run evidence

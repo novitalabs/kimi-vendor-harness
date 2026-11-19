@@ -17,6 +17,7 @@ from novita_self_test.config import (
     ModelProfile,
     ServiceAccess,
     find_secret,
+    results_root,
 )
 from novita_self_test.orchestrator import Orchestrator
 from novita_self_test.cli import _parser
@@ -64,6 +65,14 @@ def fake_suite(
 def test_real_profiles_run_on_any_host() -> None:
     profile = ModelProfile.load("kimi-k3")
     assert profile.require_execution_site() is None
+
+
+def test_results_root_defaults_to_runs_and_honors_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NVST_RESULTS_ROOT", raising=False)
+    assert results_root(tmp_path) == (tmp_path / "runs").resolve()
+    configured = tmp_path / "user-results"
+    monkeypatch.setenv("NVST_RESULTS_ROOT", str(configured))
+    assert results_root(tmp_path) == configured.resolve()
 
 
 def test_profile_execution_site_rejects_missing_marker(tmp_path: Path) -> None:

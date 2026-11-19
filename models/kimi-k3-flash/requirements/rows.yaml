@@ -31,7 +31,7 @@ source:
   contract_boundary: >-
     This snapshot records K3-flash requirements from the official document. The
     local executable matrix uses the pinned official MoonshotAI kvv-k3 source for all
-    KVV-derived tests. Closed-source Kimi Code Bench and Moonshot stress testing
+    KVV-derived tests. Moonshot stress testing
     remain external acceptance gates.
 
 novita_official_rows: []

@@ -302,91 +302,6 @@ _REPOSITORY_ALIASES = {
 }
 
 
-def _first_version(text: Any, pattern: str) -> str | None:
-    if not isinstance(text, str):
-        return None
-    found = re.search(pattern, text)
-    return found.group(0) if found else None
-
-
-def _code_bench_dependencies(
-    suite_dir: Path,
-    fingerprint: dict[str, Any],
-) -> tuple[dict[str, dict[str, Any]], list[Path]]:
-    contract = _load_json_object(suite_dir / "code-bench-run-contract.json")
-    if not contract:
-        contract = _load_json_object(suite_dir / "run-contract.json")
-    pins = dict(contract.get("pins") or {})
-    runtime: dict[str, Any] = {}
-    runtime_evidence: str | None = None
-    for candidate in (
-        suite_dir / "archive" / "runtime-versions.json",
-        suite_dir / "runtime-versions.json",
-    ):
-        if candidate.is_file():
-            runtime = _load_json_object(candidate)
-            runtime_evidence = str(candidate.relative_to(suite_dir).as_posix())
-            break
-    finalization = _load_json_object(suite_dir / "finalization-manifest.json")
-    release = dict(finalization.get("release") or {})
-    dependencies = {
-        "harbor": _dependency_entry(
-            "tool",
-            expected={"version": pins.get("harbor_version"), "python": pins.get("harbor_python")},
-            observed={
-                "version": _first_version(runtime.get("harbor_version_output"), r"\d+\.\d+\.\d+"),
-                "python": _first_version(runtime.get("harbor_python_output"), r"\d+\.\d+(?:\.\d+)?"),
-                "version_output": runtime.get("harbor_version_output"),
-                "python_output": runtime.get("harbor_python_output"),
-            },
-            evidence=runtime_evidence,
-        ),
-        "terminal_bench_2": _dependency_entry(
-            "repository",
-            expected={"ref": pins.get("terminal_bench_2_ref")},
-            observed={"ref": runtime.get("terminal_bench_2_ref")},
-            evidence=runtime_evidence,
-        ),
-        "kimi_cli": _dependency_entry(
-            "tool",
-            expected={"ref": pins.get("kimi_cli_ref")},
-            observed={
-                "ref": runtime.get("kimi_cli_ref"),
-                "wheel_sha256": runtime.get("kimi_cli_wheel_sha256"),
-            },
-            evidence=runtime_evidence,
-        ),
-        "uv": _dependency_entry(
-            "tool",
-            expected={"version": pins.get("uv_version")},
-            observed={
-                "version": _first_version(runtime.get("uv_version_output"), r"\d+\.\d+\.\d+"),
-                "version_output": runtime.get("uv_version_output"),
-            },
-            evidence=runtime_evidence,
-        ),
-        "kbench_runner": _dependency_entry(
-            "runner",
-            expected={"version": fingerprint.get("version")},
-            observed={
-                "version": release.get("runner_version"),
-                "release": release.get("release"),
-            },
-            evidence="finalization-manifest.json" if release else None,
-        ),
-    }
-    evidence_files = [
-        suite_dir / relative
-        for relative in (
-            "code-bench-run-contract.json",
-            "archive/runtime-versions.json",
-            "finalization-manifest.json",
-        )
-        if (suite_dir / relative).is_file()
-    ]
-    return dependencies, evidence_files
-
-
 def _deepswe_dependencies(
     suite_dir: Path,
     config: dict[str, Any],
@@ -449,10 +364,7 @@ def _suite_dependencies(
             evidence=entry.get("evidence"),
         )
     evidence_files: list[Path] = []
-    if adapter == "code_bench":
-        extracted, evidence_files = _code_bench_dependencies(suite_dir, fingerprint)
-        dependencies.update(extracted)
-    elif adapter == "deepswe":
+    if adapter == "deepswe":
         extracted, evidence_files = _deepswe_dependencies(suite_dir, config, fingerprint)
         dependencies.update(extracted)
     if fingerprint.get("inspect_ai"):
@@ -460,7 +372,7 @@ def _suite_dependencies(
             "tool",
             expected={"version": fingerprint.get("inspect_ai")},
         )
-    if fingerprint.get("runner") and adapter != "code_bench":
+    if fingerprint.get("runner"):
         dependencies["runner"] = _dependency_entry(
             "runner",
             expected={

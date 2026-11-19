@@ -6,7 +6,6 @@
 # Stream spec into rows 1.0/1.1/1.2 for P0/P1/P2, retain Image as row 2, place
 # toolcall rows at 7-9, and keep OCRBench/MMMU Pro/BEAM/deepSWE at 10-17.
 # Row 18 is an official K3 toolcall-arguments recovery acceptance item.
-# Kimi Code Bench is a precision-group supplementary suite in the active K3 profile.
 
 schema_version: 1
 
@@ -200,11 +199,3 @@ acceptance:
     official_result_raw: null
     official_result: {kind: count_only, value: {passed: 6, failed: 0}}
     document_self_test_result_raw: not tested
-
-supplementary:
-  - row_id: "K3-CB"
-    job: Kimi Code Bench
-    test_file: suites/kimi-code-bench/runner/v2/kbench
-    parameter: "official_observed extended: 89 tasks, 3 baseline rounds, 267 baseline trials; abnormal-only recovery"
-    official_result_raw: null
-    official_result: {kind: null, value: null}

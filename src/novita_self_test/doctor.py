@@ -110,9 +110,9 @@ def _execution_plan(profile: ModelProfile, acceptance_mode: str, root: Path) -> 
                 "artifact_contract": fingerprint.get("artifact_contract"),
                 "required_artifacts": list(dict.fromkeys(str(item) for item in required_artifacts)),
             }
-            if suite.adapter in {"kvv", "walle", "inspect", "replay", "novita_api", "deepswe", "beam", "code_bench"} and expected_trials is None:
+            if suite.adapter in {"kvv", "walle", "inspect", "replay", "novita_api", "deepswe", "beam"} and expected_trials is None:
                 errors.append(f"{suite.suite_id}: missing expected trial/count contract")
-            if suite.adapter in {"kvv", "walle", "inspect", "replay", "novita_api", "deepswe", "beam", "code_bench"} and not entry["artifact_contract"]:
+            if suite.adapter in {"kvv", "walle", "inspect", "replay", "novita_api", "deepswe", "beam"} and not entry["artifact_contract"]:
                 errors.append(f"{suite.suite_id}: missing runner_fingerprint.artifact_contract")
             if suite.adapter == "inspect":
                 command = list(suite.config.get("command") or [])
@@ -242,7 +242,16 @@ def _check(
 def _entrypoint_exists(value: str, root: Path) -> bool:
     rendered = value.replace("{repository_root}", str(root)).replace(
         "{kvv_python}",
-        os.environ.get("NVST_KVV_PYTHON", str((root / "vendor/kvv-k3/.venv/bin/python").resolve())),
+        os.environ.get(
+            "NVST_KVV_PYTHON",
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"),
+        ),
+    ).replace(
+        "{harness_python}",
+        os.environ.get(
+            "NVST_HARNESS_PYTHON",
+            str(Path.home() / ".cache/novita-kimi-vendor/venvs/harness/bin/python"),
+        ),
     )
     if "/" not in rendered:
         return shutil.which(rendered) is not None

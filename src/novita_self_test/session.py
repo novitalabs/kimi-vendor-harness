@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import SuiteResult, write_json, write_versioned_json
-from .config import ConfigError, JudgeAccess, ModelProfile, ServiceAccess, workspace_root
+from .config import ConfigError, JudgeAccess, ModelProfile, ServiceAccess, results_root, workspace_root
 from .reporting import build_report, load_suite_results, render_markdown
 from .schema_validation import validation_error
 
@@ -133,7 +133,7 @@ def _validate_run_for_session(
 
 
 def _session_path(root: Path, model_id: str, identifier: str | None = None) -> Path:
-    return root / "runs" / model_id / "sessions" / (identifier or _session_id())
+    return results_root(root) / model_id / "sessions" / (identifier or _session_id())
 
 
 def create_session(

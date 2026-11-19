@@ -114,6 +114,16 @@ def collect_runs(
     """Index every committed run under ``runs_root`` by served model and time."""
     runs_root = runs_root.resolve()
     entries: list[dict[str, Any]] = []
+    if not runs_root.is_dir():
+        return {
+            "schema_version": INDEX_SCHEMA_VERSION,
+            "model_family": model_family,
+            "served_model_filter": served_model,
+            "since": since,
+            "deployment_count": 0,
+            "run_count": 0,
+            "deployments": [],
+        }
     for model_dir in sorted(path for path in runs_root.iterdir() if path.is_dir()):
         if model_family and model_dir.name != model_family:
             continue

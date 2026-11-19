@@ -1,8 +1,0 @@
-.DS_Store
-._*
-**/__pycache__/
-*.py[cod]
-.venv/
-venv/
-_workspace/
-dist/

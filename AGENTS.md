@@ -1,9 +1,8 @@
 # kimi-vendor-harness
 
 This repository owns Novita model profiles, test selection, orchestration,
-adapters, diagnosis, reporting, Novita API tests, the Code Bench suite, and the
-DeepSWE adapter. Official Moonshot verifiers live under `vendor/` and are
-read-only.
+Novita API tests, and the DeepSWE adapter. Official Moonshot verifiers live under
+`vendor/` and are read-only.
 
 - Treat `models/<model>/profile.yaml`, `requirements/`, `suite-manifest.yaml`, and the
   shared K3-family test sets in `suites/k3-family.yaml` as the only executable matrix.
@@ -15,18 +14,18 @@ read-only.
 - `kimi-k3-flash` is a separate profile under `models/kimi-k3-flash/`. It is
   pinned to Moonshot's K3-flash document revision 122, uses only its committed
   local rows, and reuses the DeepSWE adapter.
-  Kimi Code Bench and Moonshot stress testing remain external closed gates.
+  Moonshot stress testing remains an external acceptance gate.
 - `vendor/kvv-k3` is a read-only snapshot of the official shared
   `MoonshotAI/kvv-k3` `k3` admission library (see `vendor/kvv-k3/VENDORED.md`). Its pinned source is shared by the Kimi K3, Kimi K3
   Flash, and Kimi K3.1 model family; all K3-family KVV-derived suites execute
   from this snapshot. Its three benchmark families are max-only, BEAM is
   excluded, and Git LFS fixtures must be materialized before execution.
-- Run endpoints locally through `scripts/kvh` (or `uv run nvst ... --service-access`).
+- Run endpoints locally through `scripts/kvh` (or the `scripts/kvh` entrypoint).
 - Dependency packs are per-user/per-host. Use `scripts/setup-pack.sh` and `scripts/check-packs.py`; never assume a shared build host, shared cache, or shared long-test runtime.
 - Execute the shared K3-family verifier from `vendor/kvv-k3`. Never copy or
   edit official verifier tests here.
-- `suites/novita-api/`, `suites/kimi-code-bench/`, and `suites/deepswe/` are
-  writable Novita-owned source. Preserve the imported subtree ancestry.
+- `suites/novita-api/` and `suites/deepswe/` are writable Novita-owned source.
+  Preserve the imported subtree ancestry.
 - Keep Pier and the 113-task public deepSWE corpus external at
   the path in `NVST_DEEPSWE_ROOT` on a prepared host. deepSWE is local-only and must not
   add an SSH fallback.
@@ -42,9 +41,9 @@ read-only.
   authentication failures are `service_invalid` stop conditions. HTTP 429,
   `engine_overloaded`, timeout, connection, and 5xx responses follow the
   official/profile rerun owner; if they never yield a complete result they are
-  `execution_invalid`, never a model failure or score zero. Supplementary Row 18
-uses the same rule: service errors are separated from valid model failures and
-its two toolcall recovery cases must produce non-empty valid JSON arguments.
+  `execution_invalid`, never a model failure or score zero. Row 18 uses the
+  same rule: service errors are separated from valid model failures and its two
+  toolcall recovery cases must produce non-empty valid JSON arguments.
   A post-verifier `NonZeroAgentExitCodeError` with verifier reward one is
   retained as a warning but remains execution-valid; reward-zero executions
   with an agent exception remain invalid.
@@ -52,8 +51,7 @@ its two toolcall recovery cases must produce non-empty valid JSON arguments.
 - `accept --acceptance simple|full|precision-core|k3-sop` stops immediately after any failed suite
   and publishes one verdict; remaining suites are recorded as blocked evidence.
   `precision-core` is the scoped required Rows 7..9 plus DeepSWE precision
-  mode and is not a full acceptance. BEAM and Code Bench are optional explicit
-  add-ons.
+  mode and is not a full acceptance. BEAM is an optional explicit add-on.
 - Formal `accept` rejects a dirty working tree. `develop` records dirty
   content fingerprints, and new runs pin every executable profile input by hash.
 - Replay pytest cases retain secret-safe response body, safe response headers,
@@ -68,32 +66,25 @@ its two toolcall recovery cases must produce non-empty valid JSON arguments.
   Preserve per-round counts and artifacts.
 - K3 required execution order is rows 7..9 toolcall thinking effort, rows
   10..15 benchmark precision, row 17 DeepSWE, then feature rows 1.0..6 and 18.
-  Row 16 BEAM and extended Kimi Code Bench are optional explicit suites and do
-  not gate the default acceptance plan.
+  Row 16 BEAM is an optional explicit suite and does not gate the default
+  acceptance plan.
 - K3 `k3-sop` follows Moonshot's pinned K3 上线 SOP revision 9: rows 7..9,
   10..12, 13..15, then rows 5, 6, 3, 4, Streaming P0/P1, and current
-  Novita-owned Image, BEAM, DeepSWE, Row 18, and extended Code Bench coverage.
-  Streaming P2 is intentionally excluded from this mode.
+  Novita-owned Image, DeepSWE, and Row 18 coverage. Streaming P2 is
+  intentionally excluded from this mode.
 - K3 Inspect benchmark tolerances are one-sided lower bounds: fail only when a
   score is more than 2pp below the lowest official observation. Higher scores
   pass.
 - BEAM generation completes all vendor requests before its judge starts. The
   judge runs in the background while the next suite executes and is awaited at
   run finalization; generation and judge artifacts are both required.
-- Code Bench fixes global concurrency to the selected task count and runs
-  serialized per-task pipelines over three baseline rounds: each task's next
-  round starts as soon as that task completes, with no barrier between rounds.
-  Its task-local
-  concurrency is one. Other profile concurrency values remain defaults and may
-  use `--concurrency N` in develop only; accept has no override. DeepSWE always
-  uses the committed 113 task-job concurrency; the generic concurrency override
-  is ignored for DeepSWE. Each Pier job runs
-  one task; formal round/task attempts are mixed across tasks under that
-  budget with a task-local lock forbidding same-task overlap, and after all
-  339 formal attempts each round/task whose execution never produced a binary
-  reward receives up to one batch retry wave. A completed reward=0 result is
-  a scored model failure and is never retried. Docker keeps
-  `bip=172.17.0.1/16`, allocates `/28` custom networks from
+- Other profile concurrency values remain defaults and may use `--concurrency N`
+  in develop only; accept has no override. DeepSWE always uses the committed
+  113 task-job concurrency; the generic concurrency override is ignored for
+  DeepSWE. Each Pier job runs one task with a task-local lock forbidding
+  same-task overlap. Error-only retries happen after the formal attempts, and
+  a completed reward=0 result is a scored model failure and is never retried.
+  Docker keeps `bip=172.17.0.1/16`, allocates `/28` custom networks from
   `192.168.0.0/16`, and requires a 410-network capacity probe.
 - K3 BEAM stores only its judge URL/model/API-key env name and profile-pinned
   global request rate. Endpoint and judge access metadata remain separate, but
@@ -115,6 +106,6 @@ its two toolcall recovery cases must produce non-empty valid JSON arguments.
   service, requirements, and per-suite input hashes match; contract drift needs
   an approval naming affected suites.
 
-Run `uv run nvst list --model kimi-k3` for the active profile surface. Do not
+Run `"$NVST_BIN" list --model kimi-k3` for the active profile surface. Do not
 push, merge, or delete run evidence without human approval. Run
-`uv run pytest -q tests` before proposing changes.
+`"$NVST_HARNESS_PYTHON" -m pytest -q tests` before proposing changes.
