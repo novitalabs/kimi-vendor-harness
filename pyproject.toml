@@ -1,14 +1,13 @@
 [project]
-name = "novita-self-test"
-version = "0.2.0"
-description = "Multi-model Novita vendor development and acceptance runner"
+name = "kimi-agentic-harness"
+version = "0.3.0"
+description = "Kimi agentic capability and regression test harness"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
     "httpx==0.28.1",
     "jsonschema>=4.25",
-    "inspect-ai>=0.3.158",
     "openai==2.14.0",
     "pytest>=8.0",
     "pyyaml>=6.0",
@@ -27,6 +26,7 @@ include = ["novita_self_test*"]
 
 [project.scripts]
 nvst = "novita_self_test.cli:main"
+kimi-harness = "novita_self_test.cli:main"
 
 [build-system]
 requires = ["setuptools>=75"]

@@ -1,165 +1,106 @@
-# kimi-vendor-harness
+# kimi-agentic-harness
 
-Test any inference engine's Kimi K3-family deployment (K3, K3-Flash, K3.1)
-against Moonshot's vendor acceptance requirements. Give it an OpenAI-compatible
-endpoint; it runs the official KVV suites plus Novita's own checks and produces
-one verdict with evidence.
+A capability and regression harness for deploying Kimi models on different
+inference engines. It checks engine-facing contracts used by agentic systems:
 
-## Setup (once)
+- tool calls and `tool_choice` (`none` / `auto` / `required`);
+- dynamic tools, JSON arguments and JSON Schema constrained output;
+- `json_object` / `json_schema` response formats and tools combinations;
+- thinking/reasoning fields and channel boundaries;
+- streaming SSE, tool-call deltas, finish reasons and usage;
+- Kimi XTML prompt/parser vectors and prompt-token consistency;
+- multi-turn tool-result state, error envelopes and real regressions.
 
-```bash
-git clone git@github.com:wz1qqx/kimi-vendor-harness.git
-cd kimi-vendor-harness
-scripts/setup-pack.sh core
-export NVST_HARNESS_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/python"
-export NVST_KVV_PYTHON="$HOME/.cache/novita-kimi-vendor/venvs/kvv-k3/bin/python"
-export NVST_BIN="$HOME/.cache/novita-kimi-vendor/venvs/harness/bin/nvst"
-scripts/check-packs.py --pack core
-```
+Passing these tests does **not** establish planning, reasoning, coding, vision,
+long-context, or benchmark quality. BEAM, MMMU Pro, OCRBench, DeepSWE and the
+former vendor acceptance/score orchestration are intentionally outside this
+repository.
 
-The repository is the shared test library; every user owns their own virtualenvs,
-cache, optional long-test runtime, Docker host, and credentials. Optional packs
-are installed or prepared independently; see [docs/dependency-packs.md](docs/dependency-packs.md).
+## Install
 
-Provide the endpoint token: `export KIMI_API_KEY=...`, or register it once in
-the private registry (see [docs/credentials.md](docs/credentials.md)).
-
-## Test an endpoint
-
-`scripts/kvh` builds the secret-free access file and runs `nvst` locally:
+Every user owns an environment outside the checkout:
 
 ```bash
-URL=https://your-endpoint/v1
-M=your-served-model-name
-
-# Zero-traffic environment check
-scripts/kvh --base-url $URL --served-model $M -- doctor --model kimi-k3
-
-# Quick develop: one pass, no profile repeat wave. This still sends endpoint traffic.
-# Start with one deterministic row to keep the request budget bounded.
-scripts/kvh --base-url $URL --served-model $M -- \
-  develop --model kimi-k3 --select 6
-
-# Add rows deliberately; rows 4–6 use their single develop pass, but still
-# contain 408, 126, and 59 cases respectively.
-scripts/kvh --base-url $URL --served-model $M -- \
-  develop --model kimi-k3 --select 6 --select 5 --select 4 --select 18
-
-# Streaming spec + sampling params
-scripts/kvh --base-url $URL --served-model $M -- \
-  develop --model kimi-k3 --select 1.0 --select 1.1 --select 3
-
-# Tool-call quality benchmark, effort low/high/max (113 tasks each)
-scripts/kvh --base-url $URL --served-model $M -- \
-  develop --model kimi-k3 --select 7 --select 8 --select 9
-
-# Formal acceptance (long; includes row 17 DeepSWE, which needs a prepared host)
-scripts/kvh --base-url $URL --served-model $M -- accept --model kimi-k3 --acceptance full
+uv venv "$HOME/.cache/kimi-agentic-harness/venv" --python 3.12 --allow-existing
+UV_PROJECT_ENVIRONMENT="$HOME/.cache/kimi-agentic-harness/venv" uv sync --locked
+export NVST_HARNESS_PYTHON="$HOME/.cache/kimi-agentic-harness/venv/bin/python"
+export NVST_RESULTS_ROOT="$HOME/.cache/kimi-agentic-harness/runs"
 ```
 
-Options before `--`: `--think-mode opensource|kimi` (default `opensource`),
-`--headers-json '{"X-Route":"pool-a"}'` for non-secret routing headers.
-Other nvst commands pass through too, e.g.
-`scripts/kvh --base-url $URL --served-model $M -- resume --run runs/kimi-k3/<run-id>`.
-Use `--model kimi-k3` for K3 and K3.1; `kimi-k3-flash` for K3-Flash.
+Set `KIMI_API_KEY` only in your shell or use `scripts/nvst_credentials.py`.
+Access metadata is secret-free; see `cases/service-access.example.json`.
 
-Rows 1–15 and 18 only need the endpoint. On a machine without extra setup, `doctor`
-reports DeepSWE (row 17) and BEAM (row 16) as blocked:
-
-| Suite | Needs | Host setting (environment variable) |
-|---|---|---|
-| DeepSWE, row 17 | User-owned Pier and deep-swe corpus ([docs/deepswe.md](docs/deepswe.md)) | `NVST_DEEPSWE_ROOT`, `NVST_PIER_BIN` |
-| BEAM, row 16 | Judge access ([docs/credentials.md](docs/credentials.md)) | `--judge-access` file |
-
-Host settings say where a suite runs, not what it tests, so they are not part of the shared test-set
-definitions or the suite input hash. If your network needs a proxy to reach the endpoint or to download
-benchmark datasets, set `HTTP(S)_PROXY` in your own shell; suites inherit it.
-
-Results land in `runs/<model>/<run-id>/` by default, or under the directory
-specified by `NVST_RESULTS_ROOT`. Each run contains `acceptance.md` /
-`acceptance.json`, per-suite evidence, and a `test-artifacts/` shareable bundle.
-For example:
+## Zero-traffic plan
 
 ```bash
-export NVST_RESULTS_ROOT="$HOME/.cache/novita-kimi-vendor/runs"
+"$NVST_HARNESS_PYTHON" -m novita_self_test capabilities plan \
+  --model kimi-k3 --select smoke
+"$NVST_HARNESS_PYTHON" -m novita_self_test doctor \
+  --model kimi-k3 --select smoke --max-requests 32
+"$NVST_HARNESS_PYTHON" -m novita_self_test list \
+  --model kimi-k3 --select tool_call/choice
 ```
 
-`"$NVST_BIN" list --model kimi-k3` shows every row and selector.
+Selectors include case IDs, capability paths, `tag:<tag>`,
+`component:<implementation-boundary>`, `smoke`, and glob patterns. The plan
+reports request count, output-token budget, source, knowledge links and likely
+code boundaries before any endpoint traffic.
 
-## What each row checks
+## Explicit endpoint run
 
-| Row | Suite | Checks | If it fails, look at |
-|---|---|---|---|
-| 1.0–1.2 | Streaming spec P0/P1/P2 | chunk shape, tool_call deltas and ids, usage, finish_reason | response assembly, streaming parser |
-| 2 | Image | multimodal requests | vision input path |
-| 3 | KVV `tests/params` | sampling params take effect | request handling |
-| 4 | Walle `tests/tool_call_json_schema` | tool arguments satisfy the JSON schema | constrained decoding, tool parser |
-| 5 | KVV `tests/k3_features` | tokenization, tool_choice, dynamic tools, response_format, thinking effort | prompt rendering, constrained decoding |
-| 6 | KVV `tests/prompt_tokens` | prompt token counts match official | prompt rendering |
-| 7–9 | Toolcall thinking benchmark | end-to-end tool-call quality vs official lower bound | everything above first |
-| 10–15 | OCRBench / MMMU Pro | vision accuracy | — |
-| 16 | BEAM (optional) | long-context memory; needs judge access | — |
-| 17 | DeepSWE | agentic coding; needs a prepared Pier/Docker host | — |
-| 18 | Toolcall arguments recovery | non-empty valid JSON arguments after long histories | tool parser, grammar |
+```bash
+"$NVST_HARNESS_PYTHON" -m novita_self_test capabilities run \
+  --model kimi-k3 \
+  --service-access cases/service-access.json \
+  --select tool_call/choice \
+  --max-requests 8 \
+  --execute
+```
 
-Reading results: HTTP 429, timeouts and overload are `execution_invalid`
-(rerun, don't fix code). Rows 7–15 fail only when more than 2pp below the
-lowest official observation. Deterministic rows must pass 100%.
+`--execute` is mandatory. There are no implicit retries or official repeat
+waves. A run is bounded by `--max-requests`, writes case-level request/response
+artifacts under `NVST_RESULTS_ROOT`, and redacts credentials. HTTP auth/quota,
+transport, timeout and 5xx failures are execution/service evidence, not model
+failures. An invalid-schema case may intentionally expect a 4xx; a 5xx remains
+a failed contract.
 
-## Framework-neutral parser vectors
+## Offline parser conformance
 
-`suites/novita-api/tests/k3-parser-conformance.jsonl` is a parser contract derived from the
-`k3-flash-kvv` behaviour. It covers typed arguments, raw JSON byte preservation, marker text inside
-JSON strings, malformed-call isolation, undeclared-tool dropping, truncation, and attribute unescaping.
-It is not an endpoint test: a framework adapter receives token-decoder output as chunks and returns
-normalized reasoning/content/tool calls.
+Parser vectors are a separate framework adapter contract. They do not test an
+endpoint or prove model quality:
 
 ```bash
 "$NVST_HARNESS_PYTHON" scripts/validate-parser-conformance.py
-"$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py --adapter 'python /path/to/framework_parser_adapter.py'
+"$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py \
+  --adapter 'python /path/to/framework_parser_adapter.py'
 ```
-
-The adapter protocol and expected normalized result are documented in
-`scripts/run-parser-conformance.py`. Endpoint tests remain in `suites/novita-api/tests/toolcall_contract/`.
 
 ## Layout
 
 ```text
-scripts/kvh                  local entrypoint (endpoint → nvst)
-src/novita_self_test/        nvst CLI, orchestration, adapters, reporting
-models/<model>/              profile, pinned requirement snapshot, rows + model-specific values
-suites/k3-family.yaml        test sets shared by every K3-family model (K3, K3-Flash, K3.1)
-suites/novita-api/           Novita endpoint tests and fixtures
-suites/deepswe/              DeepSWE Pier adapter
-vendor/kvv-k3/               read-only snapshot of MoonshotAI/kvv-k3 (see VENDORED.md)
-docs/                        contracts and per-model catalogs
+capabilities/         capability-owned JSONL endpoint cases
+knowledge/             implementation guidance and regression history
+profiles/              model capability declarations
+sources/               provenance and adaptation records
+src/novita_self_test/  case catalog, bounded runner and safe access handling
+schemas/               access and case schemas
+scripts/               credentials and parser conformance tools
+tests/                 harness unit tests
 ```
 
-Further reading: [docs/reference.md](docs/reference.md) (full operator
-reference), [docs/k3-test-catalog.md](docs/k3-test-catalog.md),
-[docs/k3-row-contracts.md](docs/k3-row-contracts.md),
-[docs/contracts.md](docs/contracts.md), [docs/deepswe.md](docs/deepswe.md).
+Case taxonomy and knowledge workflow are documented in
+[`docs/capability-taxonomy.md`](docs/capability-taxonomy.md). The K31 tool-call
+porting guidance is decomposed into `knowledge/` pages; unverified claims remain
+marked as such. See `docs/migration.md` and `sources/provenance.yaml` for scope
+and source boundaries.
 
 ## Development
 
 ```bash
-"$NVST_HARNESS_PYTHON" -m pytest -q tests     # unit + e2e (no endpoint traffic)
+"$NVST_HARNESS_PYTHON" -m pytest -q tests
 ```
 
-## Tool-call contract suite (standalone)
-
-`suites/novita-api/tests/toolcall_contract/` checks engine-level tool-call behaviour that the
-official KVV suites do not cover (invalid-schema handling, prompt-token stability, literal
-marker text, empty turns, undeclared tools, response_format with tools). It is not part of
-the official row matrix; run it directly against an endpoint:
-
-```bash
-cd vendor/kvv-k3 && PYTHONPATH=../../suites/novita-api:. KVV_ROOT=. TC_SAMPLES=8 \
-  TC_OBSERVATIONS_DIR=/tmp/tc "$NVST_KVV_PYTHON" -m pytest \
-  ../../suites/novita-api/tests/toolcall_contract \
-  --base-url $URL --smoke-model $M --think-mode opensource -q
-```
-
-Gate tests fail on any violation; observation tests write `toolcall-contract-observations.jsonl`
-and never fail. The harness's own tests (`tests/unit/test_toolcall_contract_suite.py`) run the
-suite against `tests/support/fake_k3_server.py` with one injected fault per known defect.
+Add a minimized production regression under its primary capability, attach
+source/provenance and knowledge links, add a fake/negative oracle where possible,
+and record the likely engine boundary. Do not add a benchmark score as a
+capability pass condition.

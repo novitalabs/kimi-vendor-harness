@@ -15,7 +15,7 @@ Adapter result:
 
 Usage:
   "$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py --adapter 'python adapter.py' \
-      --vectors suites/novita-api/tests/k3-parser-conformance.jsonl
+      --vectors capabilities/prompt_rendering/k3-parser-conformance.jsonl
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VECTORS = ROOT / "suites/novita-api/tests/k3-parser-conformance.jsonl"
+DEFAULT_VECTORS = ROOT / "capabilities/prompt_rendering/k3-parser-conformance.jsonl"
 
 
 def norm(value: dict[str, Any]) -> dict[str, Any]:

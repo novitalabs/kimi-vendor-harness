@@ -6,9 +6,7 @@ logs/
 3rdparty/
 runs/
 cases/service-access*.json
-cases/judge-access*.json
 !cases/service-access.example.json
-!cases/judge-access.example.json
 .pytest_cache/
 __pycache__/
 *.py[cod]

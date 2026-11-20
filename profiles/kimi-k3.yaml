@@ -1,0 +1,43 @@
+schema_version: 1
+model_id: kimi-k3
+family: kimi-k3
+status: ready
+efforts: [low, high, max]
+features:
+  - protocol
+  - tool_call
+  - structured_output
+  - reasoning
+  - streaming
+  - prompt_rendering
+  - usage
+  - conversation_state
+  - multimodal
+  - error_handling
+capabilities:
+  protocol: [token_limits, sampling_parameters, request_validation]
+  tool_call:
+    choices: [none, auto, required]
+    dynamic_tools: true
+    parallel_tool_calls: true
+    arguments: [json_object, typed, streaming]
+    json_schema: true
+  structured_output: [text, json_object, json_schema]
+  reasoning:
+    thinking: true
+    efforts: [low, high, max]
+  streaming: [sse, tool_call_deltas, usage]
+  prompt_rendering: [k3_xtml]
+  usage: [prompt_tokens, completion_tokens, total_tokens]
+  conversation_state: [tool_results, multi_turn]
+  multimodal: [image_input]
+  error_handling: [request_validation, error_envelope]
+tests:
+  smoke: [protocol.token_limits, tool_call.choice.none, tool_call.choice.required, structured_output.json_object, structured_output.json_schema, reasoning.effort, streaming.tool_call_deltas, prompt_rendering.parser_vectors]
+  tool-call: [tool_call/**, structured_output.tools_combined, conversation_state/**]
+  parser: [prompt_rendering.parser_vectors, streaming/parser/**]
+  prompt: [prompt_rendering/**, usage/prompt_tokens/**]
+  regressions: [regression/**]
+notes:
+  - K3.1 is not implied by this profile; verify its checkpoint encoder and capability differences before enabling it.
+  - benchmark quality suites are intentionally outside this repository's development scope.

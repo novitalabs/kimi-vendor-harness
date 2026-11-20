@@ -1,4 +1,3 @@
-"""Novita multi-model vendor acceptance tooling."""
+"""Kimi agentic capability and regression harness."""
 
-__version__ = "0.2.0"
-
+__version__ = "0.3.0"

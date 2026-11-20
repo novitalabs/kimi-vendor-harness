@@ -1,0 +1,33 @@
+schema_version: 1
+sources:
+  kvv_k3_snapshot:
+    kind: vendored_snapshot
+    repository: MoonshotAI/kvv-k3
+    commit: 6ec0eaad1ca98933327cf571c0d8b78ab8476551
+    path: "(extracted; no runtime checkout)"
+    license: MIT
+    note: >-
+      Read-only compatibility snapshot. Feature cases extracted into this
+      repository are adapted cases, not a complete official acceptance suite.
+  kvv_k3_flash_feature_branch:
+    kind: upstream_feature_source
+    repository: MoonshotAI/kvv-k3
+    branch: k3
+    observed_commit: 9ad4c1871574d7117a0297fcac9365722253d15c
+    note: >-
+      Local research checkout used to classify K3-Flash/new_model feature
+      tests. It is not a runtime dependency of the harness.
+  k3_parser_vectors:
+    kind: extracted_parser_contract
+    source: novitalabs/vllm-int:k3-flash-kvv@c94c52e24e40
+    path: capabilities/prompt_rendering/k3-parser-conformance.jsonl
+    note: >-
+      Framework-neutral XTML parser vectors. They test an adapter, not an
+      endpoint or model quality.
+  k31_toolcall_guide:
+    kind: internal_knowledge
+    source: tasks/kimi-k31-production-adaptation/TOOLCALL-PORTING-GUIDE.md
+    note: >-
+      Engineering guidance is decomposed into capability knowledge pages;
+      claims remain labelled as contract, format, framework choice, or
+      unverified until a source is attached.

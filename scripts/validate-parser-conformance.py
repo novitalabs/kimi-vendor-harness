@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VECTORS = ROOT / "suites/novita-api/tests/k3-parser-conformance.jsonl"
+DEFAULT_VECTORS = ROOT / "capabilities/prompt_rendering/k3-parser-conformance.jsonl"
 REQUIRED_EXPECTED = {"reasoning", "content", "tool_calls"}
 
 

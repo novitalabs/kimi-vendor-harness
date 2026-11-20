@@ -3,7 +3,7 @@
   "$id": "service-access.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["model_family", "base_url", "served_model", "api_key_env", "headers", "think_mode", "deployment_id", "runtime_id"],
+  "required": ["model_family", "base_url", "served_model", "api_key_env", "headers", "think_mode"],
   "properties": {
     "model_family": {"type": "string", "minLength": 1},
     "base_url": {"type": "string", "pattern": "^https?://"},
@@ -11,8 +11,8 @@
     "api_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
     "headers": {"type": "object", "additionalProperties": {"type": "string"}},
     "think_mode": {"type": "string", "minLength": 1},
-    "deployment_id": {"type": "string", "minLength": 1},
-    "runtime_id": {"type": "string", "minLength": 1},
+    "deployment_id": {"type": "string"},
+    "runtime_id": {"type": "string"},
     "source_targets": {
       "type": "array",
       "items": {
