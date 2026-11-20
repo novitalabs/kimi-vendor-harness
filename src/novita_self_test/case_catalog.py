@@ -34,6 +34,14 @@ def read_request(step: dict[str, Any], root: Path) -> dict[str, Any]:
         raise ConfigError("case_invalid", f"cannot read request fixture: {path}") from exc
     if not isinstance(request, dict):
         raise ConfigError("case_invalid", f"request fixture must contain an object: {path}")
+    if "request" in request:
+        if not isinstance(request["request"], dict):
+            raise ConfigError("case_invalid", "fixture.request must be an object")
+        return request["request"]
+    if "_repeat_run" in request:
+        # Imported incident records wrap an API request in source metadata.
+        metadata = {"id", "created_at", "prompt_tokens", "completion_tokens", "cached_tokens", "total_tokens", "msg_count", "_repeat_run", "forbidden_arguments"}
+        return {key: value for key, value in request.items() if key not in metadata}
     return request
 
 
@@ -148,6 +156,16 @@ def select_cases(cases: list[dict[str, Any]], selectors: list[str] | None) -> li
     return selected
 
 
+def iter_case_steps(case: dict[str, Any], repeat: int):
+    """Yield exactly the request units the runner will execute."""
+    if case.get("scope", "endpoint") != "endpoint":
+        return
+    for repeat_index in range(repeat):
+        for group, mode in enumerate(case["modes"]):
+            for index, step in enumerate(case["steps"]):
+                yield repeat_index, group, index, step.get("mode", mode), step
+
+
 def build_plan(cases: list[dict[str, Any]], *, model: str, repeat: int = 1,
                enabled_features: list[str] | None = None, root: Path | None = None) -> dict[str, Any]:
     if type(repeat) is not int or repeat < 1:
@@ -159,13 +177,21 @@ def build_plan(cases: list[dict[str, Any]], *, model: str, repeat: int = 1,
     for original in cases:
         case = copy.deepcopy(original)
         missing = sorted(set(case.get("requires", [])) - supported)
-        efforts = profile.get("efforts", ["low", "high", "max"])
+        capability_name = case["capability"].split("/", 1)[0]
+        if capability_name not in profile.get("capabilities", {}):
+            missing.append(f"capability:{capability_name}")
+        efforts = (profile.get("capabilities", {}).get("reasoning", {}).get("efforts")
+                   if isinstance(profile.get("capabilities", {}).get("reasoning"), dict)
+                   else profile.get("efforts", ["low", "high", "max"]))
+        efforts = efforts or profile.get("efforts", ["low", "high", "max"])
         for step in case["steps"]:
-            effort = step.get("effort") or read_request(step, root).get("reasoning_effort")
-            if effort and effort != "none" and effort not in efforts:
-                missing.append(f"effort:{effort}")
+            request = read_request(step, root)
+            candidates = [step.get("effort"), request.get("reasoning_effort"), (request.get("thinking") or {}).get("effort")]
+            for effort in candidates:
+                if effort and effort != "none" and effort not in efforts:
+                    missing.append(f"effort:{effort}")
         case.update(missing_requirements=sorted(set(missing)),
-                    planned_requests=0 if missing else case["request_budget"] * repeat)
+                    planned_requests=0 if missing else sum(1 for _ in iter_case_steps(case, repeat)))
         entries.append(case)
     plan = {"schema_version": 1, "model": model, "profile_status": profile["status"],
             "profile_notes": profile.get("notes", []), "repeat": repeat,

@@ -51,8 +51,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "list":
+            profile = load_profile(args.model)
             cases = select_cases(load_cases(), args.select)
-            output = [{key: case[key] for key in ("id", "title", "capability", "scope", "tags", "determinism", "request_budget", "likely_components", "knowledge")} for case in cases]
+            output = {"model": args.model, "profile_status": profile["status"], "cases": [{key: case[key] for key in ("id", "title", "capability", "scope", "tags", "determinism", "request_budget", "likely_components", "knowledge")} for case in cases]}
             print(json.dumps(output, ensure_ascii=False, indent=2))
             return 0
         if args.command == "capabilities" and args.capability_command == "plan":
@@ -70,8 +71,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ConfigError("model_mismatch", f"service model_family={service.model_family!r} does not match {args.model!r}")
             output = run_plan(_plan(args.model, args.select, args.repeat), service, max_requests=args.max_requests, timeout=args.timeout)
             print(json.dumps(output, ensure_ascii=False, indent=2))
-            return 0 if output["status"] == "passed" else 1
+            return 0 if output["status"] == "passed" else 2 if output["status"] in {"service_invalid", "execution_invalid", "incomplete"} else 1
         if args.command == "doctor":
+            if args.service_access:
+                access = ServiceAccess.load(args.service_access)
+                if not access.credential():
+                    raise ConfigError("credential_missing", f"set {access.api_key_env}")
             cases = select_cases(load_cases(), args.select or ["smoke"])
             profile = load_profile(args.model)
             plan = build_plan(cases, model=args.model)

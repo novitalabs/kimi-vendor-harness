@@ -38,6 +38,18 @@ def test_plan_is_bounded_and_marks_non_endpoint_cases() -> None:
     assert all(case["planned_requests"] == 0 for case in plan["cases"] if case["scope"] != "endpoint")
 
 
+def test_long_history_oracle_matches_fixture_metadata() -> None:
+    cases = {case["id"]: case for case in load_cases(ROOT)}
+    fixture = json.loads((ROOT / "capabilities/conversation_state/fixtures/case-a-invalid-arguments.jsonl").read_text().splitlines()[0])
+    assert cases["conversation_state.arguments_recovery_a"]["steps"][0]["expect"]["forbidden_arguments"] == fixture["forbidden_arguments"][0]
+
+
+def test_profile_capabilities_gate_cases() -> None:
+    flash = build_plan(select_cases(load_cases(ROOT), ["reasoning.precedence"]), model="kimi-k3-flash", root=ROOT)
+    assert flash["request_budget"] == 0
+    assert "effort:low" in flash["cases"][0]["missing_requirements"]
+
+
 def test_case_files_are_jsonl_and_secret_free() -> None:
     for path in (ROOT / "capabilities").rglob("*.jsonl"):
         for line in path.read_text().splitlines():

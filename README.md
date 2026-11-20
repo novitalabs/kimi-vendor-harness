@@ -59,7 +59,19 @@ code boundaries before any endpoint traffic.
 
 `--execute` is mandatory. There are no implicit retries or official repeat
 waves. A run is bounded by `--max-requests`, writes case-level request/response
-artifacts under `NVST_RESULTS_ROOT`, and redacts credentials. HTTP auth/quota,
+artifacts under `NVST_RESULTS_ROOT`, and redacts credentials. A run looks like:
+
+```text
+runs/kimi-k3/<run-id>/
+├── plan.json
+├── service-access.json       # public metadata only
+├── report.json
+├── report.md
+└── <case-id>-<repeat>-<mode>-<step>.json
+```
+
+Each case artifact contains the redacted request, parsed response, assertion
+result, provenance and knowledge links. HTTP auth/quota,
 transport, timeout and 5xx failures are execution/service evidence, not model
 failures. An invalid-schema case may intentionally expect a 4xx; a 5xx remains
 a failed contract.
