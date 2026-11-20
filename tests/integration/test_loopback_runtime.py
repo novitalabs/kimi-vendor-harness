@@ -116,12 +116,18 @@ def test_healthy_smoke_through_cli_counts_exact_http_requests(endpoint, tmp_path
     with endpoint(base_handler=module.Handler) as (access, requests):
         path = tmp_path / "access.json"
         path.write_text(json.dumps(access.public_dict()))
-        for args in (["doctor", "--service-access", str(path)], ["list", "--select", "smoke"],
-                     ["capabilities", "plan", "--select", "smoke"]):
+        for args in (["doctor", "--service-access", str(path)], ["plan", "--select", "smoke", "--format", "summary"],
+                     ["plan", "--select", "smoke"], ["parser", "validate"]):
             assert main(args) == 0
             capsys.readouterr()
         assert not requests
-        args = ["capabilities", "run", "--service-access", str(path), "--select", "smoke", "--execute"]
+        for old in (["list"], ["capabilities", "plan"], ["capabilities", "run", "--execute"]):
+            with pytest.raises(SystemExit) as exc:
+                main(old)
+            assert exc.value.code == 2
+            capsys.readouterr()
+        assert not requests
+        args = ["run", "--service-access", str(path), "--select", "smoke", "--execute"]
         assert main(args + ["--max-requests", "12"]) == 2
         assert "request_budget_exceeded" in capsys.readouterr().err
         assert not requests
@@ -231,7 +237,7 @@ def test_http_secret_echo_redacts_stdout_markdown_json_and_raw(endpoint, tmp_pat
     with endpoint(lambda h, req, n: send(h, body=completion(calls=[call(name=key)]))) as (access, requests):
         path = tmp_path / "access.json"
         path.write_text(json.dumps(access.public_dict()))
-        assert main(["capabilities", "run", "--service-access", str(path), "--select", "tool_call.choice.required",
+        assert main(["run", "--service-access", str(path), "--select", "tool_call.choice.required",
                      "--max-requests", "2", "--execute"]) == 1
         output = capsys.readouterr().out
         assert key not in output

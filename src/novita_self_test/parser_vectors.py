@@ -1,16 +1,11 @@
-#!/usr/bin/env python3
-"""Validate framework-neutral K3 XTML output-parser vectors."""
+"""Load and validate framework-neutral K3 XTML output-parser vectors."""
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VECTORS = ROOT / "capabilities/prompt_rendering/k3-parser-conformance.jsonl"
 REQUIRED_EXPECTED = {"reasoning", "content", "tool_calls"}
 
 
@@ -85,20 +80,3 @@ def load_vectors(path: Path) -> list[dict[str, Any]]:
     if not vectors:
         raise ValueError(f"{path}: no vectors")
     return vectors
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("vectors", type=Path, nargs="?", default=DEFAULT_VECTORS)
-    args = parser.parse_args()
-    try:
-        vectors = load_vectors(args.vectors)
-    except (OSError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    print(f"{len(vectors)} parser conformance vectors valid: {args.vectors}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

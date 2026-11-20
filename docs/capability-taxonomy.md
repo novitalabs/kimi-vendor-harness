@@ -41,12 +41,15 @@ reordered segments can have the same token count.
 
 Each endpoint case declares a stable id, title, capability, tags, source path and
 adaptation, knowledge links, likely components, determinism, modes, output cap
-and steps. `capabilities plan` reports request count and output-token budget;
-`capabilities run` requires `--execute`, a request ceiling and has no implicit
+and steps. `kimi-harness plan` reports request count and output-token budget;
+`kimi-harness run` requires `--execute`, a request ceiling and has no implicit
 retries or official repeat waves. `doctor` and `plan` are zero traffic.
+`plan --format summary` lists selected cases; `plan --select all` explicitly
+inspects the full catalog. `parser validate` and `parser run` are separate
+offline commands under the same `kimi-harness` CLI.
 
 Model profiles declare the authoritative flat `features` and `efforts` contract.
-`list`, `plan`, `doctor` and `run` use the same applicability calculation;
+`plan`, `doctor` and `run` use the same applicability calculation;
 unsupported cases are shown before traffic and are not executed. K3.1 is not
 implicitly enabled: its checkpoint encoder/config/token ids and API differences
 must be verified first. A selected KVV case is a development contract, not proof

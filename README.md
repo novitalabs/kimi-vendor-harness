@@ -28,6 +28,7 @@ Every user owns an environment outside the checkout:
 ```bash
 uv venv "$HOME/.cache/kimi-agentic-harness/venv" --python 3.12 --allow-existing
 UV_PROJECT_ENVIRONMENT="$HOME/.cache/kimi-agentic-harness/venv" uv sync --locked
+export PATH="$HOME/.cache/kimi-agentic-harness/venv/bin:$PATH"
 export NVST_HARNESS_PYTHON="$HOME/.cache/kimi-agentic-harness/venv/bin/python"
 export NVST_RESULTS_ROOT="$HOME/.cache/kimi-agentic-harness/runs"
 ```
@@ -37,27 +38,44 @@ named by the access file. The optional registry helper does not auto-populate
 that variable; see [`docs/credentials.md`](docs/credentials.md). Access metadata
 is secret-free; see `cases/service-access.example.json`.
 
+## Test entry points
+
+`kimi-harness` is the only installed test command:
+
+| Command | Purpose | Endpoint traffic |
+|---|---|---|
+| `kimi-harness plan` | Select endpoint cases, inspect applicability and budgets | None |
+| `kimi-harness doctor` | Validate local configuration, access metadata and credential env | None |
+| `kimi-harness run` | Execute endpoint cases with bounded HTTP requests | Requires `--execute` |
+| `kimi-harness parser validate` | Validate the parser-vector file only | None |
+| `kimi-harness parser run` | Execute vectors through a framework-supplied local adapter | None |
+
+The `tests/` pytest suite is for **harness development**, not an alternative way
+to execute all endpoint cases. Its HTTP integration checks use loopback fakes.
+
 ## Zero-traffic plan
 
 ```bash
-"$NVST_HARNESS_PYTHON" -m novita_self_test capabilities plan \
-  --model kimi-k3 --select smoke
-"$NVST_HARNESS_PYTHON" -m novita_self_test doctor \
-  --model kimi-k3 --select smoke --max-requests 32
-"$NVST_HARNESS_PYTHON" -m novita_self_test list \
-  --model kimi-k3 --select tool_call/choice
+kimi-harness plan --model kimi-k3 --select smoke
+kimi-harness doctor --model kimi-k3 --select smoke --max-requests 13
+kimi-harness plan --model kimi-k3 --select tool_call/choice --format summary
+# Inspect the complete catalog without executing it:
+kimi-harness plan --model kimi-k3 --select all --format summary
 ```
 
 Selectors include case IDs, capability paths, `tag:<tag>`,
 `component:<implementation-boundary>`, `smoke`, and glob patterns. The plan
 reports request count, output-token budget, source, knowledge links and likely
-code boundaries before any endpoint traffic. `list` defaults to all catalog
-cases; `plan`, `doctor`, and `run` default to `smoke`. Directory selectors include
-all subdirectories, including negative tests, so inspect the plan first.
+code boundaries before any endpoint traffic. `plan`, `doctor`, and `run`
+default to `smoke`; the complete catalog must be explicitly selected with
+`--select all`. `plan --format summary` provides a human-readable case list;
+the default `--format json` retains complete source/knowledge and case metadata.
+`--out <file>` saves the chosen format. Directory selectors include all
+subdirectories, including negative tests, so inspect the plan first.
 
 Profiles have one applicability contract: flat `features` and `efforts` in
-`profiles/*.yaml`. All four commands use it. Missing requirements are shown in
-`list`/`plan`, block `doctor`, and yield `unsupported` without sending those
+`profiles/*.yaml`. All three endpoint commands use it. Missing requirements
+are shown in `plan`, block `doctor`, and yield `unsupported` without sending those
 requests in `run`. `doctor --service-access <file>` additionally validates the
 access file, matching model family, and credential environment variable; it does
 not contact the endpoint. `served_model` may be a deployment-specific alias.
@@ -65,7 +83,7 @@ not contact the endpoint. `served_model` may be a deployment-specific alias.
 ## Explicit endpoint run
 
 ```bash
-"$NVST_HARNESS_PYTHON" -m novita_self_test capabilities run \
+kimi-harness run \
   --model kimi-k3 \
   --service-access cases/service-access.json \
   --select tool_call.choice.none \
@@ -113,14 +131,14 @@ Parser vectors are a separate framework adapter contract. They do not test an
 endpoint or prove model quality:
 
 ```bash
-"$NVST_HARNESS_PYTHON" scripts/validate-parser-conformance.py
-"$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py \
+kimi-harness parser validate
+kimi-harness parser run \
   --adapter 'python /path/to/framework_parser_adapter.py' \
-  --adapter-timeout 30
+  --timeout 30
 ```
 
 The adapter consumes JSONL from stdin, emits one result per request in order,
-and must exit with code 0 after EOF. `--adapter-timeout` is a total process
+and must exit with code 0 after EOF. `--timeout` is a total process
 wall-clock limit (30 seconds by default). Hung adapters and their child process
 group are killed; stderr cannot deadlock the exchange. No framework parser
 adapter is bundled, so a successful synthetic adapter self-test is not evidence
@@ -135,8 +153,8 @@ profiles/              model capability declarations
 sources/               provenance and adaptation records
 src/novita_self_test/  case catalog, bounded runner and safe access handling
 schemas/               access and case schemas
-scripts/               credentials and parser conformance tools
-tests/                 harness unit tests
+scripts/               optional private credential utility
+tests/                 harness unit tests and loopback HTTP checks
 ```
 
 Case taxonomy and knowledge workflow are documented in
@@ -162,6 +180,9 @@ execution is a separate offline framework check.
   crash. Run only against a target where the selected negative probes are safe.
 
 ## Development
+
+Run the harness self-tests (unit, synthetic adapter, and loopback HTTP), not
+live endpoint acceptance:
 
 ```bash
 "$NVST_HARNESS_PYTHON" -m pytest -q -p no:cacheprovider tests

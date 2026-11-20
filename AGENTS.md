@@ -12,8 +12,10 @@ DeepSWE or model-quality score benchmarks.
   universal runtime dependency or K3.1 contract.
 - Keep official/KVV-derived cases small and adapted. Record original path,
   commit and adaptation in the case; never imply complete official coverage.
-- `capabilities plan` and `doctor` are zero traffic. Endpoint runs require
-  explicit `--execute`, a request ceiling and no implicit retries.
+- `kimi-harness` is the only installed test CLI: `plan`, `doctor`, `run`,
+  `parser validate`, and `parser run`. Do not add legacy command aliases.
+  `plan` and `doctor` are zero traffic. Endpoint runs require explicit
+  `--execute`, a request ceiling and no implicit retries.
 - Separate endpoint cases, parser adapter vectors and harness-local unit tests.
   Parser vectors never prove endpoint behavior.
 - HTTP auth/quota/timeout/429/5xx/connection problems are service or execution

@@ -1,4 +1,4 @@
-"""Kimi agentic capability harness command line."""
+"""The single public CLI for endpoint cases and offline parser conformance."""
 from __future__ import annotations
 
 import argparse
@@ -10,42 +10,61 @@ from typing import Sequence
 from .case_catalog import build_plan, load_cases, select_cases
 from .capability_runtime import run_plan, token_parameter
 from .config import ConfigError, ServiceAccess
+from .parser_conformance import DEFAULT_VECTORS, run_adapter, validate_vectors
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="kimi-harness", description="Kimi capability and regression tests")
+    root = argparse.ArgumentParser(prog="kimi-harness", description="Kimi capability and regression tests", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True)
-    listing = commands.add_parser("list", help="list cases and model applicability (no traffic)")
-    listing.add_argument("--model", default="kimi-k3")
-    listing.add_argument("--select", action="append")
-
-    capabilities = commands.add_parser("capabilities", help="plan or run endpoint capability cases")
-    sub = capabilities.add_subparsers(dest="capability_command", required=True)
-    plan = sub.add_parser("plan", help="zero-traffic plan")
+    plan = commands.add_parser("plan", help="inspect cases and request budgets (no traffic)", allow_abbrev=False)
     plan.add_argument("--model", default="kimi-k3")
     plan.add_argument("--select", action="append")
     plan.add_argument("--repeat", type=int, default=1)
+    plan.add_argument("--format", choices=("json", "summary"), default="json")
     plan.add_argument("--out", type=Path)
-    run = sub.add_parser("run", help="run selected cases against an endpoint")
+
+    doctor = commands.add_parser("doctor", help="zero-traffic local preflight; does not prove endpoint health", allow_abbrev=False)
+    doctor.add_argument("--model", default="kimi-k3")
+    doctor.add_argument("--service-access", type=Path)
+    doctor.add_argument("--select", action="append")
+    doctor.add_argument("--max-requests", type=int, default=32)
+
+    run = commands.add_parser("run", help="run selected cases against an endpoint", allow_abbrev=False)
     run.add_argument("--model", default="kimi-k3")
     run.add_argument("--service-access", required=True, type=Path)
     run.add_argument("--select", action="append")
     run.add_argument("--repeat", type=int, default=1)
     run.add_argument("--max-requests", type=int, default=32)
-    run.add_argument("--timeout", type=float, default=120, help="wall-clock seconds per request")
+    run.add_argument("--timeout", type=float, default=120, help="wall-clock seconds per HTTP request")
     run.add_argument("--execute", action="store_true", help="acknowledge endpoint traffic")
     run.add_argument("--allow-opt-in", action="store_true", help="also acknowledge explicitly tagged opt-in/long-history cases")
 
-    doctor = commands.add_parser("doctor", help="zero-traffic local preflight; does not prove endpoint health")
-    doctor.add_argument("--model", default="kimi-k3")
-    doctor.add_argument("--service-access", type=Path)
-    doctor.add_argument("--select", action="append")
-    doctor.add_argument("--max-requests", type=int, default=32)
+    conformance = commands.add_parser("parser", help="offline parser-vector validation and adapter execution", allow_abbrev=False)
+    sub = conformance.add_subparsers(dest="parser_command", required=True)
+    validate = sub.add_parser("validate", help="validate vector files only; no adapter or endpoint", allow_abbrev=False)
+    validate.add_argument("--vectors", type=Path, default=DEFAULT_VECTORS)
+    adapter = sub.add_parser("run", help="run vectors through a framework-supplied adapter (no endpoint)", allow_abbrev=False)
+    adapter.add_argument("--vectors", type=Path, default=DEFAULT_VECTORS)
+    adapter.add_argument("--adapter", required=True, help="executable command consuming/emitting JSONL")
+    adapter.add_argument("--timeout", type=float, default=30.0, help="total adapter wall-clock seconds")
     return root
 
 
 def _plan(model: str, selectors: list[str] | None, repeat: int = 1) -> dict:
     return build_plan(select_cases(load_cases(), selectors or ["smoke"]), model=model, repeat=repeat)
+
+
+def _summary(plan: dict) -> str:
+    lines = [f"Model: {plan['model']} ({plan['profile_status']})",
+             f"Cases: {len(plan['cases'])}; requests: {plan['request_budget']}; output-token ceiling: {plan['max_output_tokens_budget']}",
+             f"Repeat: {plan['repeat']}; concurrency: {plan['concurrency']}; retries: {plan['retries']}",
+             "No endpoint traffic generated.", ""]
+    for case in plan["cases"]:
+        applicability = "unsupported: " + ", ".join(case["missing_requirements"]) if case["missing_requirements"] else "applicable"
+        opt_in = "; requires --allow-opt-in" if "opt_in" in case["tags"] else ""
+        lines.append(f"- {case['id']} | {case['planned_requests']} requests | {applicability}{opt_in}")
+        lines.append(f"  {case['title']} [{case['determinism']}]")
+    return "\n".join(lines)
 
 
 def _access(path: Path, model: str, *, credential_required: bool) -> ServiceAccess:
@@ -60,23 +79,21 @@ def _access(path: Path, model: str, *, credential_required: bool) -> ServiceAcce
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        if args.command == "list":
-            plan = _plan(args.model, args.select or ["all"])
-            fields = ("id", "title", "capability", "scope", "tags", "determinism", "request_budget",
-                      "planned_requests", "missing_requirements", "required_features", "source",
-                      "likely_components", "knowledge")
-            output = {"model": args.model, "profile_status": plan["profile_status"],
-                      "cases": [{key: case[key] for key in fields} for case in plan["cases"]]}
-            exit_code = 0
-        elif args.command == "capabilities" and args.capability_command == "plan":
-            output = _plan(args.model, args.select, args.repeat)
+        if args.command == "parser":
+            if args.parser_command == "validate":
+                return validate_vectors(args.vectors)
+            return run_adapter(args.vectors, args.adapter, timeout=args.timeout)
+        if args.command == "plan":
+            plan = _plan(args.model, args.select, args.repeat)
+            text = _summary(plan) if args.format == "summary" else json.dumps(plan, ensure_ascii=False, indent=2)
             if args.out:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
-                args.out.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            exit_code = 0
-        elif args.command == "capabilities" and args.capability_command == "run":
+                args.out.write_text(text + "\n", encoding="utf-8")
+            print(text)
+            return 0
+        if args.command == "run":
             if not args.execute:
-                raise ConfigError("execute_ack_required", "capability run sends endpoint traffic; add --execute")
+                raise ConfigError("execute_ack_required", "run sends endpoint traffic; add --execute")
             plan = _plan(args.model, args.select, args.repeat)
             access = _access(args.service_access, args.model, credential_required=plan["request_budget"] > 0)
             output = run_plan(plan, access, max_requests=args.max_requests, timeout=args.timeout, allow_opt_in=args.allow_opt_in)
@@ -109,7 +126,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return exit_code
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -7,12 +7,16 @@ benchmark datasets.
 ```bash
 uv venv "$HOME/.cache/kimi-agentic-harness/venv" --python 3.12 --allow-existing
 UV_PROJECT_ENVIRONMENT="$HOME/.cache/kimi-agentic-harness/venv" uv sync --locked
+export PATH="$HOME/.cache/kimi-agentic-harness/venv/bin:$PATH"
 export NVST_HARNESS_PYTHON="$HOME/.cache/kimi-agentic-harness/venv/bin/python"
 ```
 
+The installed test command is `kimi-harness`. Endpoint tests use `plan`,
+`doctor`, and `run`; parser checks use `parser validate` and `parser run`.
 The parser conformance adapter is supplied by the framework developer and is
 invoked explicitly. It is not an inference endpoint and has no shared venv
-contract.
+contract. Updating with `uv sync --locked` also updates the installed command
+entry points; no separate scripts or compatibility aliases are required.
 
 Endpoint credentials are supplied through an environment variable named by the
 secret-free service-access file. Results are written to ignored `runs/` or

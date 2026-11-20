@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
 """Run offline K3 XTML vectors with a framework-supplied JSONL parser adapter.
 
 The adapter reads requests from stdin and emits exactly one result per line:
 request: {id, text, chunks: [str], tools: [str], finish: stop|length}
 result: {reasoning: str, content: str, tool_calls: [{name: str, index: int, arguments: str}]}
 
-No endpoint/model is involved. The process is bounded by --adapter-timeout
+No endpoint/model is involved. The process is bounded by the CLI --timeout
 (total wall-clock seconds) and must exit successfully after stdin EOF.
 """
 from __future__ import annotations
 
-import argparse
 import contextlib
 import json
 import math
@@ -23,8 +21,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VECTORS = ROOT / "capabilities/prompt_rendering/k3-parser-conformance.jsonl"
+from .config import workspace_root
+from .parser_vectors import load_vectors
+
+DEFAULT_VECTORS = workspace_root() / "capabilities/prompt_rendering/k3-parser-conformance.jsonl"
 MAX_RESULT_BYTES = 4 * 1024 * 1024
 
 
@@ -43,12 +43,21 @@ def norm(value: Any) -> dict[str, Any]:
     return {"reasoning": value["reasoning"], "content": value["content"], "tool_calls": calls}
 
 
-def run(vectors: Path, adapter: str, adapter_timeout: float = 30.0) -> int:
-    from parser_conformance_lib import load_vectors
+def validate_vectors(vectors: Path) -> int:
+    try:
+        cases = load_vectors(vectors)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"{len(cases)} parser conformance vectors valid: {vectors}")
+    return 0
+
+
+def run_adapter(vectors: Path, adapter: str, *, timeout: float = 30.0) -> int:
     try:
         cases = load_vectors(vectors)
         command = shlex.split(adapter)
-        if not command or not math.isfinite(adapter_timeout) or adapter_timeout <= 0:
+        if not command or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("adapter command and finite positive timeout are required")
     except (OSError, ValueError) as exc:
         print(f"parser conformance configuration: {exc}", file=sys.stderr)
@@ -74,9 +83,9 @@ def run(vectors: Path, adapter: str, adapter_timeout: float = 30.0) -> int:
             return 2
         communicate_error = None
         try:
-            process.communicate(input=payload, timeout=adapter_timeout)
+            process.communicate(input=payload, timeout=timeout)
         except subprocess.TimeoutExpired:
-            print(f"parser adapter timed out after {adapter_timeout}s", file=sys.stderr)
+            print(f"parser adapter timed out after {timeout}s", file=sys.stderr)
             return 2
         except (BrokenPipeError, OSError) as exc:
             communicate_error = f"adapter I/O failed: {type(exc).__name__}: {exc}"
@@ -120,16 +129,3 @@ def run(vectors: Path, adapter: str, adapter_timeout: float = 30.0) -> int:
         return 1
     print(f"{len(cases)} vectors passed across {len(requests)} chunk-size trials")
     return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--adapter", required=True)
-    parser.add_argument("--vectors", type=Path, default=DEFAULT_VECTORS)
-    parser.add_argument("--adapter-timeout", type=float, default=30.0, help="total adapter wall-clock seconds")
-    args = parser.parse_args()
-    return run(args.vectors, args.adapter, args.adapter_timeout)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
