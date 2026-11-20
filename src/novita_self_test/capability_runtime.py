@@ -278,7 +278,7 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
             problems.append("missing JSON error object")
     if reply.status != 200:
         return problems
-    if reply.finish_reason == "length":
+    if reply.finish_reason == "length" and not expect.get("allow_truncation"):
         return problems + ["output truncated: contract is inconclusive"]
     if expect.get("finish_reason") and reply.finish_reason != expect["finish_reason"]:
         problems.append(f"finish_reason={reply.finish_reason!r}, expected={expect['finish_reason']!r}")
@@ -306,12 +306,13 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
         problems.append("calls require finish_reason=tool_calls")
     if not reply.calls and reply.finish_reason == "tool_calls":
         problems.append("finish_reason=tool_calls without calls")
-    calls = reply.calls[:1] if expect.get("first_call_only") else reply.calls
-    for call in calls:
+    for call in reply.calls:
         if not call.get("name"):
             problems.append("empty tool name")
-        if expect.get("tool_names") and call["name"] not in expect["tool_names"]:
-            problems.append(f"undeclared/unexpected tool {call['name']!r}")
+        if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
+            problems.append(f"undeclared/unexpected tool {call.get('name')!r}")
+    calls = reply.calls[:1] if expect.get("first_call_only") else reply.calls
+    for call in calls:
         if expect.get("arguments_nonempty") and not call.get("arguments"):
             problems.append("tool-call arguments are empty")
         if expect.get("arguments_json") or "arguments_schema" in expect:
@@ -340,13 +341,15 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
                 problems.extend("content schema: " + error.message for error in Draft202012Validator(expect["content_schema"]).iter_errors(value))
         except (ValueError, TypeError):
             problems.append("content is not valid JSON")
-    if any(key in expect for key in ("usage", "usage_details", "prompt_tokens", "same_prompt_as", "minimum_prompt_delta")):
+    if any(key in expect for key in ("usage", "usage_details", "max_completion_tokens", "prompt_tokens", "same_prompt_as", "minimum_prompt_delta")):
         usage = reply.usage or {}
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             if type(usage.get(key)) is not int or usage[key] < 0:
                 problems.append(f"usage.{key} missing or not a nonnegative integer")
         if all(type(usage.get(key)) is int for key in ("prompt_tokens", "completion_tokens", "total_tokens")) and usage["total_tokens"] != usage["prompt_tokens"] + usage["completion_tokens"]:
             problems.append("usage total != prompt + completion")
+        if "max_completion_tokens" in expect and type(usage.get("completion_tokens")) is int and usage["completion_tokens"] > expect["max_completion_tokens"]:
+            problems.append("completion usage exceeds selected output cap")
         if "prompt_tokens" in expect and usage.get("prompt_tokens") != expect["prompt_tokens"]:
             problems.append(f"prompt_tokens={usage.get('prompt_tokens')}, expected={expect['prompt_tokens']}")
         if expect.get("usage_details"):
@@ -434,13 +437,13 @@ def _outcome(reply: Reply, expect: dict[str, Any], problems: list[str]) -> tuple
         if failure == "service_unavailable" and 400 <= expect["status"] < 500:
             return "failed", failure
         return "execution_invalid", failure
-    if reply.incomplete or (reply.finish_reason == "length" and expect.get("finish_reason") != "length"):
+    if reply.incomplete or (reply.finish_reason == "length" and not expect.get("allow_truncation") and expect.get("finish_reason") != "length"):
         return "inconclusive", None
     return ("failed" if problems else "passed"), None
 
 
 def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
-             root: Path | None = None, timeout: float = 120) -> dict[str, Any]:
+             root: Path | None = None, timeout: float = 120, allow_opt_in: bool = False) -> dict[str, Any]:
     root = root or workspace_root()
     if type(max_requests) is not int or max_requests < 0:
         raise ConfigError("request_budget_invalid", "max_requests must be a nonnegative integer")
@@ -448,6 +451,9 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
         raise ConfigError("timeout_invalid", "timeout must be finite and positive")
     if plan["model"] != service.model_family:
         raise ConfigError("model_mismatch", "service model_family does not match plan")
+    opt_in = [case["id"] for case in plan["cases"] if "opt_in" in case.get("tags", []) and not case["missing_requirements"]]
+    if opt_in and not allow_opt_in:
+        raise ConfigError("opt_in_ack_required", "selected opt-in cases require --allow-opt-in: " + ", ".join(opt_in))
     units = [(case, *unit) for case in plan["cases"] if not case["missing_requirements"]
              for unit in iter_case_steps(case, plan["repeat"])]
     expected_count = len(units)
@@ -460,8 +466,19 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
         raise ConfigError("credential_missing", f"set {service.api_key_env}")
     # Resolve all fixtures before sending the first request, freezing the exact
     # request bytes represented by this run (not a later-mutated fixture).
-    prepared = [(case, repeat, group, index, mode, step, materialize_step(step, case, service, mode, root))
-                for case, repeat, group, index, mode, step in units]
+    prepared = []
+    for case, repeat, group, index, mode, step in units:
+        request = materialize_step(step, case, service, mode, root)
+        expect = copy.deepcopy(step["expect"])
+        if expect["status"] == 200:
+            tools = list(request.get("tools") or [])
+            for message in request["messages"]:
+                tools.extend(message.get("tools") or [])
+            declared = [tool["function"]["name"] for tool in tools]
+            if set(expect.get("tool_names", [])) - set(declared):
+                raise ConfigError("case_invalid", f"{case['id']}: oracle names an undeclared tool")
+            expect.setdefault("tool_names", declared)
+        prepared.append((case, repeat, group, index, mode, step, request, expect))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     directory = results_root(root) / plan["model"] / f"{stamp}-{os.urandom(4).hex()}"
     directory.mkdir(parents=True, exist_ok=False)
@@ -478,7 +495,7 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
                for case in plan["cases"] if case["missing_requirements"]]
     client, actual_requests, stop_reason = CapabilityClient(service, timeout=timeout), 0, None
     histories: dict[tuple[str, int, int], list[Reply]] = {}
-    for case, repeat, group, index, mode, step, request in prepared:
+    for case, repeat, group, index, mode, step, request, expect in prepared:
         result = {"id": case["id"], "capability": case["capability"], "repeat": repeat,
                   "mode": mode, "step": index, "problems": [], "likely_components": case["likely_components"],
                   "knowledge": case["knowledge"], "source": case["source"]}
@@ -493,8 +510,10 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
         try:
             actual_requests += 1
             reply = client.call(request)
-            problems = assert_reply(reply, step["expect"], history, mode=mode)
-            status, failure = _outcome(reply, step["expect"], problems)
+            problems = assert_reply(reply, expect, history, mode=mode)
+            status, failure = _outcome(reply, expect, problems)
+            if status == "passed" and case.get("determinism") == "observation":
+                status = "observed"
             history.append(reply)
             result.update(status=status, problems=problems, failure_class=failure)
             if failure:
@@ -505,11 +524,11 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
                           problems=[f"runner error: {type(exc).__name__}: {exc}"])
         result["evidence"] = evidence_name
         save(evidence_name, {"request": request, "response": asdict(reply) if reply is not None else None,
-                             "expect": step["expect"], "result": result, "request_sha256": canonical_hash(request)})
+                             "expect": expect, "result": result, "request_sha256": canonical_hash(request)})
         results.append(result)
     statuses = {result["status"] for result in results}
     status = next((value for value in ("service_invalid", "execution_invalid", "failed") if value in statuses), None)
-    status = status or ("incomplete" if statuses & {"inconclusive", "unsupported", "not_run"} else "passed")
+    status = status or ("incomplete" if statuses & {"inconclusive", "unsupported", "not_run"} else "observed" if "observed" in statuses else "passed")
     report = redact({"schema_version": 1, "status": status, "model": plan["model"], "run_dir": str(directory),
                      "stop_reason": stop_reason, "planned_requests": expected_count, "actual_requests": actual_requests,
                      "results": results, "disclaimer": "Capability regression evidence; not a model-quality benchmark or vendor acceptance."}, credential)

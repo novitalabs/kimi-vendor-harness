@@ -2,37 +2,29 @@ schema_version: 1
 model_id: kimi-k3-flash
 family: kimi-k3
 status: ready
-efforts:
-- max
+efforts: [max]
 features:
-- protocol
-- tool_call
-- structured_output
-- reasoning
-- streaming
-- prompt_rendering
-- usage
-- conversation_state
-- multimodal
-- error_handling
-capabilities:
-  reasoning:
-    efforts:
-    - max
-  tool_call:
-    choices:
-    - none
-    - auto
-    - required
-    dynamic_tools: true
-    json_schema: true
-  structured_output:
-  - json_object
-  - json_schema
-  streaming:
-  - sse
-  - tool_call_deltas
+  - protocol
+  - tool_call
+  - tool_call.schema
+  - tool_call.choice.none
+  - tool_call.choice.auto
+  - tool_call.choice.required
+  - tool_call.dynamic_tools
+  - platform.dynamic_tool_validation
+  - structured_output
+  - structured_output.text
+  - structured_output.json_object
+  - structured_output.json_schema
+  - reasoning
+  - reasoning.disable
+  - streaming
+  - prompt_rendering
   - usage
+  - conversation_state
+  - multimodal
+  - error_handling
 notes:
-- Flash feature tests are Kimi-specific API/engine contracts, not a quality score.
-- Benchmark families and full official repeat matrices are outside this profile.
+  - Max-only effort applicability follows the pinned Flash profile; unsupported effort probes are shown but not executed.
+  - Dynamic-tool validation probes target the pinned KVV platform contract, not generic OpenAI rules; they require --allow-opt-in.
+  - This profile describes capability applicability, not verified endpoint support or model quality.

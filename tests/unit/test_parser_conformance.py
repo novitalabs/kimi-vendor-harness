@@ -33,3 +33,87 @@ def test_parser_validator_rejects_duplicate_id(tmp_path: Path) -> None:
     )
     assert process.returncode == 1
     assert "duplicate id" in process.stderr
+
+
+def run_adapter(tmp_path, body, *options):
+    adapter = tmp_path / "adapter.py"
+    adapter.write_text(body, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, "scripts/run-parser-conformance.py", "--adapter", f"{sys.executable} {adapter}", *options],
+        cwd=ROOT, text=True, capture_output=True, check=False, timeout=10,
+    )
+
+
+def test_parser_adapter_timeout_including_partial_line(tmp_path):
+    process = run_adapter(tmp_path, "import sys,time\nsys.stdout.write('{'); sys.stdout.flush(); time.sleep(60)\n",
+                          "--adapter-timeout", "0.15")
+    assert process.returncode == 2
+    assert "timed out" in process.stderr
+
+
+def test_parser_adapter_bad_json_wrong_count_and_nonzero_exit(tmp_path):
+    process = run_adapter(tmp_path, "import sys\nfor line in sys.stdin: print('[]', flush=True)\nsys.exit(3)\n")
+    assert process.returncode == 1
+    assert "status 3" in process.stderr
+    assert "invalid adapter JSON/result" in process.stderr
+    process = run_adapter(tmp_path, "import sys\nsys.stdin.read()\n")
+    assert process.returncode == 1
+    assert "result count=0" in process.stderr
+
+
+def test_parser_adapter_protocol_passes_and_extra_lines_fail(tmp_path):
+    body = (
+        "import json,sys\n"
+        f"cases={{x['id']:x['expected'] for x in map(json.loads,open({str(VECTORS)!r}))}}\n"
+        "for line in sys.stdin:\n"
+        " req=json.loads(line); assert ''.join(req['chunks'])==req['text']; print(json.dumps(cases[req['id']]), flush=True)\n"
+    )
+    process = run_adapter(tmp_path, body)
+    assert process.returncode == 0, process.stderr
+    assert "7 vectors passed" in process.stdout
+    process = run_adapter(tmp_path, body + "print('{}')\n")
+    assert process.returncode == 1
+    assert "result count" in process.stderr
+
+
+def test_parser_adapter_noisy_stderr_cannot_deadlock(tmp_path):
+    body = (
+        "import json,sys\n"
+        "sys.stderr.write('synthetic diagnostics\\n' * 20000);sys.stderr.flush()\n"
+        f"cases={{x['id']:x['expected'] for x in map(json.loads,open({str(VECTORS)!r}))}}\n"
+        "for line in sys.stdin: print(json.dumps(cases[json.loads(line)['id']]), flush=True)\n"
+    )
+    process = run_adapter(tmp_path, body, "--adapter-timeout", "2")
+    assert process.returncode == 0, process.stderr
+
+
+def test_parser_adapter_timeout_reaps_child_process(tmp_path):
+    import os
+    import time
+    import pytest
+    pidfile = tmp_path / "child.pid"
+    body = (
+        "import subprocess,sys,time\n"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
+        f"open({str(pidfile)!r},'w').write(str(p.pid))\n"
+        "time.sleep(60)\n"
+    )
+    process = run_adapter(tmp_path, body, "--adapter-timeout", "0.5")
+    assert process.returncode == 2
+    pid = int(pidfile.read_text())
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("adapter child survived process-group timeout")
+
+
+def test_parser_adapter_rejects_invalid_timeout_and_binary_results(tmp_path):
+    process = run_adapter(tmp_path, "pass\n", "--adapter-timeout", "nan")
+    assert process.returncode == 2
+    process = run_adapter(tmp_path, "import sys\nsys.stdin.read();sys.stdout.buffer.write(bytes([255]))\n")
+    assert process.returncode == 1
+    assert "not UTF-8" in process.stderr

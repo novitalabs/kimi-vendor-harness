@@ -7,7 +7,7 @@ new-model behavior, inside system messages. Dynamic tools must retain their
 message position and must be merged with global tools without silently changing
 names or order.
 
-## Case families
+## Implemented case families
 
 - global function declaration
 - duplicate names within one declaration
@@ -16,7 +16,11 @@ names or order.
 - nested parameter schema
 - invalid tool name/type/shape
 - dynamic message role/content validation
-- 128-character tool name boundary
+
+The 128-character boundary, mixed supported/unsupported types, duplicates across
+distinct dynamic messages and the full upstream matrix are not covered here.
+Role/content/name validation is a pinned Kimi-platform contract, not a universal
+OpenAI rule; these negative probes require `--allow-opt-in`.
 
 ## Likely implementation components
 
@@ -28,6 +32,6 @@ names or order.
 
 ## Source
 
-Adapted from `MoonshotAI/kvv-k3` K3-Flash `tests/k3_features/test_dynamic_tools.py`
-and `tests/params/test_params.py`. The KVV runtime is not required to run the
-capability catalog.
+Adapted from `MoonshotAI/kvv-k3` `tests/k3_features/test_dynamic_tools.py`
+at the revisions recorded in `sources/provenance.yaml`. The KVV runtime is not
+required to run the capability catalog.

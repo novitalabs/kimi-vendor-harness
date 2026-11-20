@@ -1,7 +1,7 @@
-"""A tiny OpenAI-compatible fake that behaves like a contract-abiding K3 endpoint, with switchable faults.
+"""A small loopback-only OpenAI-compatible fixture with switchable faults.
 
-Used to validate the tool-call contract suite itself: the healthy fake must pass every gate test, and each
-fault reproduces one known engine defect that exactly one gate test is supposed to catch.
+The healthy fixture covers the default capability smoke, not the complete
+catalog or any real engine. Faults are negative controls for harness assertions.
 
     python fake_k3_server.py --port 18080 [--faults empty_turn,xtml_leak]
 
@@ -173,8 +173,10 @@ class Handler(BaseHTTPRequestHandler):
         out = compose(req, self.faults)
         stream = bool(req.get("stream"))
         used = prompt_tokens(req, self.faults) + (1 if stream and "usage_stream_off" in self.faults else 0)
-        usage = {"prompt_tokens": used, "completion_tokens": 5, "total_tokens": used + 5}
-        finish = "tool_calls" if out["calls"] else "stop"
+        cap = req.get("max_completion_tokens", req.get("max_tokens", 5))
+        completion = min(5, cap)
+        usage = {"prompt_tokens": used, "completion_tokens": completion, "total_tokens": used + completion}
+        finish = "length" if cap < 5 else "tool_calls" if out["calls"] else "stop"
         if not stream:
             message: dict[str, Any] = {"role": "assistant", "content": out["content"]}
             if out["reasoning"]:

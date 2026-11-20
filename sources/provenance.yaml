@@ -24,6 +24,14 @@ sources:
     note: >-
       Framework-neutral XTML parser vectors. They test an adapter, not an
       endpoint or model quality.
+  harness_regressions:
+    kind: harness_owned_regression
+    repository: wz1qqx/kimi-vendor-harness
+    commit: 0f34fe9
+    note: >-
+      Historical harness-owned tests are inspectable at this Git revision;
+      they are not KVV tests. Stream cases implement a selected subset of the
+      historical Stream Spec revision 244 interpretation, not the full suite.
   k31_toolcall_guide:
     kind: internal_knowledge
     source: tasks/kimi-k31-production-adaptation/TOOLCALL-PORTING-GUIDE.md

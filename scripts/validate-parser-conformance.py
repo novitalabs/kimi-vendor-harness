@@ -30,9 +30,11 @@ def validate_case(case: Any, line: int) -> list[str]:
         errors.append(f"{prefix}: source_revision must be a non-empty string")
     if not isinstance(case.get("text"), str) or "<|open|>" not in case.get("text", ""):
         errors.append(f"{prefix}: text must be XTML containing <|open|>")
+    if "finish" in case and case["finish"] not in ("stop", "length"):
+        errors.append(f"{prefix}: finish must be stop or length")
     chunks = case.get("chunks")
     if not isinstance(chunks, list) or not chunks or not all(
-        (isinstance(v, int) and v > 0) or v == "all" for v in chunks
+        (type(v) is int and v > 0) or v == "all" for v in chunks
     ):
         errors.append(f"{prefix}: chunks must be positive integers or 'all'")
     tools = case.get("tools")
@@ -50,8 +52,9 @@ def validate_case(case: Any, line: int) -> list[str]:
             if not isinstance(call, dict):
                 errors.append(f"{prefix}: tool_calls[{index}] must be an object")
                 continue
-            if not isinstance(call.get("name"), str) or not isinstance(call.get("index"), int):
-                errors.append(f"{prefix}: tool_calls[{index}] needs string name and integer index")
+            if (not isinstance(call.get("name"), str) or not call["name"]
+                    or type(call.get("index")) is not int or call["index"] < 0):
+                errors.append(f"{prefix}: tool_calls[{index}] needs nonempty name and nonnegative integer index")
             if not isinstance(call.get("arguments"), str):
                 errors.append(f"{prefix}: tool_calls[{index}].arguments must be a string")
     return errors

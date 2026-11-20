@@ -1,117 +1,124 @@
 #!/usr/bin/env python3
-"""Run framework-neutral K3 XTML output-parser vectors through an adapter.
+"""Run offline K3 XTML vectors with a framework-supplied JSONL parser adapter.
 
-The adapter is an executable supplied by the framework under test. It receives one
-JSON request per line on stdin and must return one JSON result per line on stdout.
-No model or endpoint is involved: these vectors constrain the parser after token
-generation, including chunk-boundary behaviour.
+The adapter reads requests from stdin and emits exactly one result per line:
+request: {id, text, chunks: [str], tools: [str], finish: stop|length}
+result: {reasoning: str, content: str, tool_calls: [{name: str, index: int, arguments: str}]}
 
-Adapter request:
-  {"id": str, "text": str, "chunks": [str|"all"], "tools": [str], "finish": "stop"|"length"}
-
-Adapter result:
-  {"reasoning": str, "content": str, "tool_calls":
-   [{"name": str, "index": int, "arguments": str}]}
-
-Usage:
-  "$NVST_HARNESS_PYTHON" scripts/run-parser-conformance.py --adapter 'python adapter.py' \
-      --vectors capabilities/prompt_rendering/k3-parser-conformance.jsonl
+No endpoint/model is involved. The process is bounded by --adapter-timeout
+(total wall-clock seconds) and must exit successfully after stdin EOF.
 """
-
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
+import os
 import shlex
+import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VECTORS = ROOT / "capabilities/prompt_rendering/k3-parser-conformance.jsonl"
+MAX_RESULT_BYTES = 4 * 1024 * 1024
 
 
-def norm(value: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "reasoning": value.get("reasoning", ""),
-        "content": value.get("content", ""),
-        "tool_calls": [
-            {
-                "name": call.get("name"),
-                "index": call.get("index"),
-                "arguments": call.get("arguments", ""),
-            }
-            for call in value.get("tool_calls", [])
-        ],
-    }
+def norm(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or not {"reasoning", "content", "tool_calls"} <= value.keys():
+        raise ValueError("result needs reasoning, content and tool_calls")
+    if not isinstance(value["reasoning"], str) or not isinstance(value["content"], str) or not isinstance(value["tool_calls"], list):
+        raise ValueError("result channels/calls have invalid types")
+    calls = []
+    for call in value["tool_calls"]:
+        if (not isinstance(call, dict) or not isinstance(call.get("name"), str)
+                or type(call.get("index")) is not int or call["index"] < 0
+                or not isinstance(call.get("arguments"), str)):
+            raise ValueError("invalid tool-call result")
+        calls.append({key: call[key] for key in ("name", "index", "arguments")})
+    return {"reasoning": value["reasoning"], "content": value["content"], "tool_calls": calls}
 
 
-def run(vectors: Path, adapter: str) -> int:
+def run(vectors: Path, adapter: str, adapter_timeout: float = 30.0) -> int:
+    from parser_conformance_lib import load_vectors
     try:
-        from parser_conformance_lib import load_vectors
         cases = load_vectors(vectors)
-    except (ImportError, OSError, ValueError) as exc:
-        print(f"cannot load parser conformance vectors: {exc}", file=sys.stderr)
+        command = shlex.split(adapter)
+        if not command or not math.isfinite(adapter_timeout) or adapter_timeout <= 0:
+            raise ValueError("adapter command and finite positive timeout are required")
+    except (OSError, ValueError) as exc:
+        print(f"parser conformance configuration: {exc}", file=sys.stderr)
         return 2
-    try:
-        process = subprocess.Popen(
-            shlex.split(adapter), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
-        )
-    except OSError as exc:
-        print(f"cannot start parser adapter: {exc}", file=sys.stderr)
-        return 2
-    assert process.stdin is not None and process.stdout is not None
-    failures: list[str] = []
-    try:
-        for case in cases:
-            for chunk_size in case["chunks"]:
-                text = case["text"]
-                if chunk_size == "all":
-                    chunks = [text]
-                elif chunk_size == 1:
-                    chunks = list(text)
-                else:
-                    chars = list(text)
-                    chunks = ["".join(chars[i:i + chunk_size]) for i in range(0, len(chars), chunk_size)]
-                request = {
-                    "id": case["id"],
-                    "text": text,
-                    "chunks": chunks,
-                    "tools": case.get("tools", []),
-                    "finish": case.get("finish", "stop"),
-                }
-                process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
-                process.stdin.flush()
-                line = process.stdout.readline()
-                if not line:
-                    failures.append(f"{case['id']} chunk={chunk_size}: adapter exited without a result")
-                    break
-                try:
-                    actual = norm(json.loads(line))
-                except (json.JSONDecodeError, TypeError) as exc:
-                    failures.append(f"{case['id']} chunk={chunk_size}: invalid adapter JSON: {exc}")
-                    continue
-                expected = norm(case["expected"])
-                if actual != expected:
-                    failures.append(
-                        f"{case['id']} chunk={chunk_size}:\n"
-                        f"  expected={json.dumps(expected, ensure_ascii=False, sort_keys=True)}\n"
-                        f"  actual={json.dumps(actual, ensure_ascii=False, sort_keys=True)}"
-                    )
-    finally:
-        if process.stdin:
-            process.stdin.close()
-        process.terminate()
-        stderr = process.stderr.read() if process.stderr else ""
-        process.wait(timeout=5)
+    requests, expected, labels = [], [], []
+    for case in cases:
+        for size in case["chunks"]:
+            text = case["text"]
+            chunks = [text] if size == "all" else [text[i:i + size] for i in range(0, len(text), size)]
+            requests.append({"id": case["id"], "text": text, "chunks": chunks,
+                             "tools": case["tools"], "finish": case.get("finish", "stop")})
+            expected.append(norm(case["expected"]))
+            labels.append(f"{case['id']} chunk={size}")
+    payload = "".join(json.dumps(request, ensure_ascii=False) + "\n" for request in requests)
+    failures = []
+    # File-backed output prevents a noisy stderr pipe from deadlocking the adapter.
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        try:
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=stdout, stderr=stderr,
+                                       text=True, start_new_session=True)
+        except OSError as exc:
+            print(f"cannot start parser adapter: {exc}", file=sys.stderr)
+            return 2
+        communicate_error = None
+        try:
+            process.communicate(input=payload, timeout=adapter_timeout)
+        except subprocess.TimeoutExpired:
+            print(f"parser adapter timed out after {adapter_timeout}s", file=sys.stderr)
+            return 2
+        except (BrokenPipeError, OSError) as exc:
+            communicate_error = f"adapter I/O failed: {type(exc).__name__}: {exc}"
+        finally:
+            # Kill the isolated process group, including any surviving children.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+            if process.stdin:
+                process.stdin.close()
+        if communicate_error:
+            failures.append(communicate_error)
+        if process.returncode:
+            failures.append(f"adapter exited with status {process.returncode}")
+        stdout.seek(0)
+        raw = stdout.read(MAX_RESULT_BYTES + 1)
+        if len(raw) > MAX_RESULT_BYTES:
+            print("parser adapter result exceeds 4 MiB", file=sys.stderr)
+            return 2
+        try:
+            lines = raw.decode("utf-8").splitlines()
+        except UnicodeError:
+            print("parser adapter result is not UTF-8", file=sys.stderr)
+            return 1
+        if len(lines) != len(expected):
+            failures.append(f"adapter result count={len(lines)}, expected={len(expected)}")
+        for label, line, wanted in zip(labels, lines, expected):
+            try:
+                actual = norm(json.loads(line))
+            except (ValueError, TypeError) as exc:
+                failures.append(f"{label}: invalid adapter JSON/result: {exc}")
+                continue
+            if actual != wanted:
+                failures.append(f"{label}:\n  expected={json.dumps(wanted, ensure_ascii=False)}\n  actual={json.dumps(actual, ensure_ascii=False)}")
+        stderr.seek(0)
+        error_text = stderr.read(8192).decode("utf-8", errors="replace")
     if failures:
         print("\n".join(failures), file=sys.stderr)
-        if stderr:
-            print(f"adapter stderr:\n{stderr}", file=sys.stderr)
+        if error_text:
+            print(f"adapter stderr (bounded):\n{error_text}", file=sys.stderr)
         return 1
-    print(f"{len(cases)} vectors passed across requested chunk sizes")
+    print(f"{len(cases)} vectors passed across {len(requests)} chunk-size trials")
     return 0
 
 
@@ -119,12 +126,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adapter", required=True)
     parser.add_argument("--vectors", type=Path, default=DEFAULT_VECTORS)
+    parser.add_argument("--adapter-timeout", type=float, default=30.0, help="total adapter wall-clock seconds")
     args = parser.parse_args()
-    try:
-        return run(args.vectors, args.adapter)
-    except OSError as exc:
-        print(f"parser conformance vector I/O failed: {exc}", file=sys.stderr)
-        return 2
+    return run(args.vectors, args.adapter, args.adapter_timeout)
 
 
 if __name__ == "__main__":

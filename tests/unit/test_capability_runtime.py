@@ -125,7 +125,7 @@ def make_case(id="case.one", expect=None):
 
 def plan(*cases, repeat=1):
     count = sum(len(case["steps"]) * len(case["modes"]) for case in cases) * repeat
-    return {"model": "kimi-k3", "repeat": repeat, "request_budget": count, "cases": list(cases)}
+    return {"model": "kimi-k3", "repeat": repeat, "request_budget": count, "cases": [{**case, "missing_requirements": []} for case in cases]}
 
 
 @pytest.mark.parametrize("reply,status", [(Reply(401, '{"error":{"message":"invalid api key"}}'), "service_invalid"), (Reply(429), "execution_invalid"), (Reply(503), "execution_invalid"), (Reply(None, errors=["transport failure: ConnectError"]), "execution_invalid")])
@@ -171,7 +171,8 @@ def test_all_report_representations_redact_echoed_secret(service, monkeypatch, t
     key = service.credential()
     reply = parse_reply(200, json.dumps(completion("", calls=[tool_call(name=key)], finish="tool_calls")), stream=False)
     monkeypatch.setattr(CapabilityClient, "call", lambda self, request: reply)
-    report = run_plan(plan(make_case(expect={"status": 200, "tool_names": ["get_weather"]})), service, max_requests=1, root=tmp_path)
+    case = make_case(expect={"status": 200})
+    report = run_plan(plan(case), service, max_requests=1, root=tmp_path)
     assert key not in json.dumps(report)
     for file in Path(report["run_dir"]).iterdir():
         assert key not in file.read_text(), file
@@ -199,6 +200,32 @@ def test_truncated_output_is_inconclusive_not_model_failure(service, monkeypatch
     report = run_plan(plan(make_case()), service, max_requests=1, root=tmp_path)
     assert report["status"] == "incomplete"
     assert report["results"][0]["status"] == "inconclusive"
+
+
+def test_output_cap_allows_intentional_truncation_but_checks_usage(service, monkeypatch, tmp_path):
+    from novita_self_test.case_catalog import load_cases
+    case = next(item for item in load_cases() if item["id"] == "protocol.token_limits")
+    replies = iter([
+        parse_reply(200, json.dumps(completion("", finish="length", usage={"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3})), stream=False),
+        parse_reply(200, json.dumps(completion("", finish="length", usage={"prompt_tokens": 2, "completion_tokens": 2, "total_tokens": 4})), stream=False),
+    ])
+    monkeypatch.setattr(CapabilityClient, "call", lambda self, request: next(replies))
+    first = run_plan(plan(case), service, max_requests=1, root=tmp_path)
+    second = run_plan(plan(case), service, max_requests=1, root=tmp_path)
+    assert first["status"] == "passed"
+    assert second["status"] == "failed"
+    assert "completion usage exceeds selected output cap" in second["results"][0]["problems"]
+
+
+def test_token_wire_parameter_is_exclusive_and_invalid_value_is_local(tmp_path, service, monkeypatch):
+    step = {"request": {"messages": [{"role": "user", "content": "Hi"}]}}
+    monkeypatch.setenv("NVST_TOKEN_PARAM", "max_completion_tokens")
+    wire = materialize_step(step, {"max_output_tokens": 1}, service, "nonstream", tmp_path)
+    assert wire["max_completion_tokens"] == 1
+    assert "max_tokens" not in wire
+    monkeypatch.setenv("NVST_TOKEN_PARAM", "invalid")
+    with pytest.raises(ConfigError, match="max_tokens or max_completion_tokens"):
+        run_plan(plan(make_case()), service, max_requests=1, root=tmp_path)
 
 
 def test_budget_mismatch_and_invalid_timeout_send_nothing(service, monkeypatch, tmp_path):

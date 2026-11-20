@@ -52,18 +52,18 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def find_secret(value: Any, *, path: str = "$") -> str | None:
+def find_secret(value: Any, *, path: str = "$", allowed_text: frozenset[str] = frozenset()) -> str | None:
     if isinstance(value, dict):
         for key, item in value.items():
             if str(key).lower() in SECRET_HEADER_NAMES and item not in (None, ""):
                 return f"{path}.{key} contains a forbidden credential header"
-            if found := find_secret(item, path=f"{path}.{key}"):
+            if found := find_secret(item, path=f"{path}.{key}", allowed_text=allowed_text):
                 return found
     elif isinstance(value, list):
         for index, item in enumerate(value):
-            if found := find_secret(item, path=f"{path}[{index}]"):
+            if found := find_secret(item, path=f"{path}[{index}]", allowed_text=allowed_text):
                 return found
-    elif isinstance(value, str) and SECRET_VALUE_RE.search(value):
+    elif isinstance(value, str) and any(match.group() not in allowed_text for match in SECRET_VALUE_RE.finditer(value)):
         return f"{path} appears to contain credential material"
     return None
 
@@ -71,7 +71,8 @@ def find_secret(value: Any, *, path: str = "$") -> str | None:
 def redact(value: Any, secret: str = "") -> Any:
     """Redact before serialization, including escaped response bodies and errors."""
     if isinstance(value, dict):
-        return {key: "[REDACTED]" if str(key).lower() in SECRET_HEADER_NAMES else redact(item, secret)
+        return {redact(key, secret) if isinstance(key, str) else key:
+                "[REDACTED]" if str(key).lower() in SECRET_HEADER_NAMES else redact(item, secret)
                 for key, item in value.items()}
     if isinstance(value, list):
         return [redact(item, secret) for item in value]

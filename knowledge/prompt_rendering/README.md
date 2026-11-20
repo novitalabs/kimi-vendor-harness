@@ -23,4 +23,7 @@ Token fixtures record original expected counts without automatic vLLM +3/+image
 corrections. Exact-oracle cases require an explicitly verified tokenizer revision
 and accounting convention; parity cases compare equivalent endpoint requests.
 K3.1 special ids and JSON literal rules remain unverified until its checkpoint
-is pinned. Optional renderer adapters compare full token-id sequences offline.
+is pinned. A future renderer adapter should compare full token-id sequences
+offline; none is supplied here. `prompt_rendering.literal_markers` is an endpoint
+usage observation only and returns `observed`, even if its usage integers are
+valid. It does not establish that literal markers stayed ordinary text.

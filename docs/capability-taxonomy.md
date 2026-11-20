@@ -45,7 +45,9 @@ and steps. `capabilities plan` reports request count and output-token budget;
 `capabilities run` requires `--execute`, a request ceiling and has no implicit
 retries or official repeat waves. `doctor` and `plan` are zero traffic.
 
-Model profiles declare capabilities and supported effort values. K3.1 is not
+Model profiles declare the authoritative flat `features` and `efforts` contract.
+`list`, `plan`, `doctor` and `run` use the same applicability calculation;
+unsupported cases are shown before traffic and are not executed. K3.1 is not
 implicitly enabled: its checkpoint encoder/config/token ids and API differences
 must be verified first. A selected KVV case is a development contract, not proof
 of complete official coverage.
@@ -59,5 +61,9 @@ of complete official coverage.
 5. Update the capability knowledge page with symptom, suspected boundary,
    confirmed cause, fix and versioned evidence.
 
-See `docs/migration.md` and `sources/provenance.yaml` for the retained/extracted
+The default smoke plan is 9 cases / 13 requests. The current endpoint catalog
+has 58 cases; explicit `opt_in` acknowledgement is required for long-history
+and platform-specific negative probes. Parser vectors are separate: 7 vectors
+and 21 offline chunk trials, with no bundled engine adapter. See
+`docs/migration.md` and `sources/provenance.yaml` for the retained/extracted
 boundary.

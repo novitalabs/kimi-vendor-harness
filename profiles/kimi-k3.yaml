@@ -2,68 +2,29 @@ schema_version: 1
 model_id: kimi-k3
 family: kimi-k3
 status: ready
-efforts:
-- low
-- high
-- max
+efforts: [low, high, max]
 features:
-- protocol
-- tool_call
-- structured_output
-- reasoning
-- streaming
-- prompt_rendering
-- usage
-- conversation_state
-- multimodal
-- error_handling
-capabilities:
-  protocol:
-  - token_limits
-  - sampling_parameters
-  - request_validation
-  tool_call:
-    choices:
-    - none
-    - auto
-    - required
-    dynamic_tools: true
-    parallel_tool_calls: true
-    arguments:
-    - json_object
-    - typed
-    - streaming
-    json_schema: true
-  structured_output:
-  - text
-  - json_object
-  - json_schema
-  reasoning:
-    thinking: true
-    efforts:
-    - low
-    - high
-    - max
-  streaming:
-  - sse
-  - tool_call_deltas
+  - protocol
+  - tool_call
+  - tool_call.schema
+  - tool_call.choice.none
+  - tool_call.choice.auto
+  - tool_call.choice.required
+  - tool_call.dynamic_tools
+  - platform.dynamic_tool_validation
+  - structured_output
+  - structured_output.text
+  - structured_output.json_object
+  - structured_output.json_schema
+  - reasoning
+  - reasoning.disable
+  - streaming
+  - prompt_rendering
   - usage
-  prompt_rendering:
-  - k3_xtml
-  usage:
-  - prompt_tokens
-  - completion_tokens
-  - total_tokens
-  conversation_state:
-  - tool_results
-  - multi_turn
-  multimodal:
-  - image_input
-  error_handling:
-  - request_validation
-  - error_envelope
+  - conversation_state
+  - multimodal
+  - error_handling
 notes:
-- K3.1 is not implied by this profile; verify its checkpoint encoder and capability
-  differences before enabling it.
-- benchmark quality suites are intentionally outside this repository's development
-  scope.
+  - K3.1 is not implied; verify its checkpoint encoder, config, token ids and API differences before enabling it.
+  - Dynamic-tool validation probes target the pinned KVV platform contract, not generic OpenAI rules; they require --allow-opt-in.
+  - This profile describes capability applicability, not verified endpoint support or model quality.

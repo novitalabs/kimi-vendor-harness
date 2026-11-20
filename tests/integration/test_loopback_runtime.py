@@ -1,0 +1,268 @@
+"""Real HTTP negative controls, bound exclusively to 127.0.0.1 (no model).
+
+All keys and responses here are synthetic. HTTP traffic is counted by the
+server as well as the runner so records cannot be mistaken for requests.
+"""
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+from novita_self_test import capability_runtime as runtime
+from novita_self_test.case_catalog import build_plan, load_cases, select_cases
+from novita_self_test.cli import main
+from novita_self_test.config import ConfigError, ServiceAccess
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def completion(content="OK", *, calls=None, finish=None, usage=None):
+    message = {"role": "assistant", "content": content}
+    if calls is not None:
+        message["tool_calls"] = calls
+    return {"choices": [{"index": 0, "message": message,
+                         "finish_reason": finish or ("tool_calls" if calls else "stop")}],
+            "usage": usage or {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}}
+
+
+def call(name="get_weather", arguments='{"city":"Beijing"}', id="call_0"):
+    return {"id": id, "type": "function", "function": {"name": name, "arguments": arguments}}
+
+
+def frames():
+    return [
+        {"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]},
+        {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, **call(arguments="")}]}, "finish_reason": None}]},
+        {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"city":"Beijing"}'}}]}, "finish_reason": None}]},
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+        {"choices": [], "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}},
+    ]
+
+
+def sse(chunks, done=True):
+    return "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + ("data: [DONE]\n\n" if done else "")
+
+
+def send(handler, status=200, body=None, *, raw=None, stream=False):
+    data = (raw if raw is not None else json.dumps(body)).encode()
+    handler.send_response(status)
+    handler.send_header("Content-Type", "text/event-stream" if stream else "application/json")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+    handler.wfile.flush()
+
+
+@pytest.fixture
+def endpoint(monkeypatch, tmp_path):
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    monkeypatch.setenv("LOOPBACK_TEST_KEY", "synthetic-loopback-secret")
+    monkeypatch.setenv("NVST_RESULTS_ROOT", str(tmp_path / "runs"))
+
+    @contextmanager
+    def serve(responder=None, base_handler=BaseHTTPRequestHandler):
+        requests = []
+
+        class Handler(base_handler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                requests.append(request)
+                if responder is None:
+                    # Rewind-free reuse of the healthy fixture's request handler.
+                    import io
+                    self.rfile = io.BytesIO(json.dumps(request).encode())
+                    self.headers.replace_header("Content-Length", str(len(self.rfile.getvalue())))
+                    return super().do_POST()
+                responder(self, request, len(requests))
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        thread.start()
+        access = ServiceAccess.from_dict({"model_family": "kimi-k3", "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+            "served_model": "fake", "api_key_env": "LOOPBACK_TEST_KEY", "headers": {}, "think_mode": "opensource"})
+        try:
+            yield access, requests
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+    return serve
+
+
+def catalog_plan(*selectors, repeat=1):
+    return build_plan(select_cases(load_cases(ROOT), list(selectors)), model="kimi-k3", repeat=repeat, root=ROOT)
+
+
+def evidence(report, n=0):
+    return json.loads(Path(report["run_dir"], report["results"][n]["evidence"]).read_text())
+
+
+def test_healthy_smoke_through_cli_counts_exact_http_requests(endpoint, tmp_path, capsys):
+    spec = importlib.util.spec_from_file_location("loopback_fake", ROOT / "tests/support/fake_k3_server.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with endpoint(base_handler=module.Handler) as (access, requests):
+        path = tmp_path / "access.json"
+        path.write_text(json.dumps(access.public_dict()))
+        for args in (["doctor", "--service-access", str(path)], ["list", "--select", "smoke"],
+                     ["capabilities", "plan", "--select", "smoke"]):
+            assert main(args) == 0
+            capsys.readouterr()
+        assert not requests
+        args = ["capabilities", "run", "--service-access", str(path), "--select", "smoke", "--execute"]
+        assert main(args + ["--max-requests", "12"]) == 2
+        assert "request_budget_exceeded" in capsys.readouterr().err
+        assert not requests
+        assert main(args + ["--max-requests", "13"]) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert len(requests) == report["actual_requests"] == report["planned_requests"] == 13
+        assert len(report["results"]) == 13
+        assert report["status"] == "passed"
+        for row in report["results"]:
+            assert Path(report["run_dir"], row["evidence"]).is_file()
+
+
+@pytest.mark.parametrize("status,code,want", [
+    (401, "unauthorized", "service_invalid"), (403, "forbidden", "service_invalid"),
+    (402, "insufficient_quota", "service_invalid"), (429, "rate_limit", "execution_invalid"),
+    (500, "server_error", "execution_invalid"), (503, "overloaded", "execution_invalid"),
+])
+def test_http_service_fail_fast_and_no_retry(endpoint, status, code, want):
+    with endpoint(lambda h, req, n: send(h, status, {"error": {"code": code, "message": code}})) as (access, requests):
+        report = runtime.run_plan(catalog_plan("smoke"), access, max_requests=13)
+        assert len(requests) == report["actual_requests"] == 1
+        assert report["status"] == want
+        assert all(row["status"] == "not_run" for row in report["results"][1:])
+        assert evidence(report)["response"]["status"] == status
+
+
+def test_expected_400_but_500_is_robustness_failure_and_stops(endpoint):
+    with endpoint(lambda h, req, n: send(h, 500, {"error": {"message": "grammar crashed"}})) as (access, requests):
+        plan = catalog_plan("error_handling.invalid_schema", "tool_call.choice.none")
+        report = runtime.run_plan(plan, access, max_requests=3)
+        assert report["status"] == "failed"
+        assert len(requests) == 1
+        assert report["stop_reason"] == "service_unavailable"
+
+
+def test_http_malformed_200_keeps_raw_evidence(endpoint):
+    body = completion([])
+    with endpoint(lambda h, req, n: send(h, body=body)) as (access, requests):
+        report = runtime.run_plan(catalog_plan("structured_output.json_object"), access, max_requests=1)
+        assert report["status"] == "failed"
+        assert len(requests) == 1
+        assert json.loads(evidence(report)["response"]["raw"]) == body
+        assert any("content must be a string" in item for item in report["results"][0]["problems"])
+
+
+@pytest.mark.parametrize("fault", ["healthy", "missing_id", "missing_name", "id_rewrite", "after_finish", "duplicate_usage", "missing_done", "after_done"])
+def test_http_stream_lifecycle(endpoint, fault):
+    chunks = frames()
+    if fault == "missing_id":
+        del chunks[1]["choices"][0]["delta"]["tool_calls"][0]["id"]
+    elif fault == "missing_name":
+        del chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"]
+    elif fault == "id_rewrite":
+        chunks[2]["choices"][0]["delta"]["tool_calls"][0]["id"] = "changed"
+    elif fault == "after_finish":
+        chunks.insert(-1, {"choices": [{"index": 0, "delta": {"content": "late"}, "finish_reason": None}]})
+    elif fault == "duplicate_usage":
+        chunks.append(copy.deepcopy(chunks[-1]))
+    raw = sse(chunks, done=fault != "missing_done")
+    if fault == "after_done":
+        raw += sse([chunks[-1]], done=False)
+    with endpoint(lambda h, req, n: send(h, raw=raw, stream=True)) as (access, requests):
+        report = runtime.run_plan(catalog_plan("streaming.tool_call_deltas"), access, max_requests=1)
+        want = "passed" if fault == "healthy" else "incomplete" if fault == "missing_done" else "failed"
+        assert report["status"] == want
+        assert len(requests) == 1
+        assert evidence(report)["response"]["raw"] == raw
+
+
+@pytest.mark.parametrize("done", [False, True])
+def test_http_timeout_retains_partial_or_done_bytes(endpoint, done):
+    release = threading.Event()
+    raw = sse(frames(), done=done)
+    def stall(handler, req, n):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Content-Length", str(len(raw.encode()) + 1024))
+        handler.end_headers()
+        handler.wfile.write(raw.encode())
+        handler.wfile.flush()
+        release.wait(2)
+    try:
+        with endpoint(stall) as (access, requests):
+            report = runtime.run_plan(catalog_plan("streaming.tool_call_deltas"), access, max_requests=1, timeout=0.5)
+            assert report["status"] == "execution_invalid"
+            assert len(requests) == 1
+            response = evidence(report)["response"]
+            assert response["raw"] == raw
+            assert response["done"] == done
+            assert response["chunks"]
+            assert response["incomplete"]
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("content", ["[]", "null", "{}", '{"other":1}'])
+def test_http_tools_combination_rejects_wrong_json(endpoint, content):
+    with endpoint(lambda h, req, n: send(h, body=completion(content))) as (access, requests):
+        report = runtime.run_plan(catalog_plan("structured_output.tools_combined"), access, max_requests=2)
+        assert report["status"] != "passed"
+        assert report["results"][0]["status"] == "failed"
+        assert any("content schema" in p for p in report["results"][0]["problems"])
+
+
+def test_http_secret_echo_redacts_stdout_markdown_json_and_raw(endpoint, tmp_path, capsys):
+    key = "synthetic-loopback-secret"
+    with endpoint(lambda h, req, n: send(h, body=completion(calls=[call(name=key)]))) as (access, requests):
+        path = tmp_path / "access.json"
+        path.write_text(json.dumps(access.public_dict()))
+        assert main(["capabilities", "run", "--service-access", str(path), "--select", "tool_call.choice.required",
+                     "--max-requests", "2", "--execute"]) == 1
+        output = capsys.readouterr().out
+        assert key not in output
+        report = json.loads(output)
+        for file in Path(report["run_dir"]).iterdir():
+            assert key not in file.read_text(), file
+        assert "[REDACTED]" in Path(report["run_dir"], "report.md").read_text()
+
+
+def test_http_repeat_history_and_mode_override_are_isolated(endpoint):
+    def respond(handler, req, n):
+        count = 100 if n <= 2 else 200
+        usage = {"prompt_tokens": count, "completion_tokens": 3, "total_tokens": count + 3}
+        if req["stream"]:
+            send(handler, raw=sse([
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "OK"}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                {"choices": [], "usage": usage},
+            ]), stream=True)
+        else:
+            send(handler, body=completion(usage=usage))
+    with endpoint(respond) as (access, requests):
+        report = runtime.run_plan(catalog_plan("usage.stream_consistency", repeat=2), access, max_requests=4)
+        assert report["status"] == "passed"
+        assert len(requests) == 4
+        assert [request["stream"] for request in requests] == [False, True, False, True]
+        assert len({row["evidence"] for row in report["results"]}) == 4
+
+
+def test_opt_in_requires_ack_before_any_http(endpoint):
+    with endpoint(lambda h, req, n: send(h, body=completion())) as (access, requests):
+        with pytest.raises(ConfigError, match="allow-opt-in"):
+            runtime.run_plan(catalog_plan("conversation_state.arguments_recovery_a"), access, max_requests=1)
+        assert not requests
