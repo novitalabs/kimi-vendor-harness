@@ -16,6 +16,11 @@ Source: KVV `test_thinking_effort.py` / `test_thinking_extra_body.py`, K31 guide
   not any historical close marker, and should be incremental in long contexts.
 - Stop matching belongs in response content, not reasoning/tool argument text.
 
+Ordinary positive cases now declare canonical thinking intent, translated by
+the selected service dialect (`opensource` versus `kimi`). Raw conflict/alias
+probes remain raw and are not rewritten. In particular, a conflict observation
+is not proof of precedence. Token-cap/default tests remain explicitly separate.
+
 Do not use model self-report of effort or reasoning-length ordering as a hard
 engine oracle. KVV contains noisy/skipped examples of both. Capability cases
 check request acceptance, channel shape and nonempty public output; byte/token

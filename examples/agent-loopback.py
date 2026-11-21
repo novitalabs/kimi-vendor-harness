@@ -50,9 +50,9 @@ def exercise(out: Path) -> dict:
                     {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}, "finish_reason": None}]},
                     {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
                 ]
-                payload = ("".join("data: " + json.dumps(frame) + "\n\n" for frame in frames) + "data: [DONE]\n\n").encode()
+                payload = ("".join("data: " + json.dumps({"id": "chatcmpl-demo", "model": "loopback-fake", "created": 0, "object": "chat.completion.chunk", **frame}) + "\n\n" for frame in frames) + "data: [DONE]\n\n").encode()
             else:
-                payload = json.dumps({"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [call]}, "finish_reason": "tool_calls"}]}).encode()
+                payload = json.dumps({"id": "chatcmpl-demo", "model": "loopback-fake", "created": 0, "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [call]}, "finish_reason": "tool_calls"}]}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream" if request["stream"] else "application/json")
             self.send_header("Content-Length", str(len(payload)))

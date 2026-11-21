@@ -186,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
                     {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"]}}
                     for c in out["calls"]
                 ]
-            return self._json(200, {"id": "chatcmpl-fake", "object": "chat.completion", "model": req.get("model"),
+            return self._json(200, {"id": "chatcmpl-fake", "object": "chat.completion", "model": req.get("model"), "created": 0,
                                     "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage})
         chunks: list[dict[str, Any]] = [{"role": "assistant", "content": ""}]
         if out["reasoning"]:
@@ -200,12 +200,12 @@ class Handler(BaseHTTPRequestHandler):
             half = len(call["arguments"]) // 2 or 1
             for part in (call["arguments"][:half], call["arguments"][half:]):
                 chunks.append({"tool_calls": [{"index": index, "function": {"arguments": part}}]})
-        frames = [{"id": "chatcmpl-fake", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": d, "finish_reason": None}]}
+        frames = [{"id": "chatcmpl-fake", "object": "chat.completion.chunk", "model": req.get("model"), "created": 0, "choices": [{"index": 0, "delta": d, "finish_reason": None}]}
                   for d in chunks]
-        frames.append({"id": "chatcmpl-fake", "object": "chat.completion.chunk",
+        frames.append({"id": "chatcmpl-fake", "object": "chat.completion.chunk", "model": req.get("model"), "created": 0,
                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
         if (req.get("stream_options") or {}).get("include_usage"):
-            frames.append({"id": "chatcmpl-fake", "object": "chat.completion.chunk", "choices": [], "usage": usage})
+            frames.append({"id": "chatcmpl-fake", "object": "chat.completion.chunk", "model": req.get("model"), "created": 0, "choices": [], "usage": usage})
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")

@@ -142,6 +142,17 @@ def test_plan_relocation_between_identical_checkouts_is_supported(checkout, serv
     assert len(verify_plan(plan, service, root=clone)) == 13
 
 
+def test_freeze_rejects_case_object_stale_before_file_hash_snapshot(checkout, service):
+    from novita_self_test.execution_plan import _freeze
+    from novita_self_test.case_catalog import load_cases
+    selected = [case for case in load_cases(checkout) if case["id"] == "tool_call.choice.required"]
+    path = checkout / selected[0]["file"]
+    path.write_text(path.read_text().replace("北京今天天气怎么样？", "上海今天天气怎么样？"))
+    with pytest.raises(ConfigError) as exc:
+        _freeze(selected, model="kimi-k3", repeat=1, service=service, max_requests=2, timeout=120, root=checkout)
+    assert exc.value.code == "plan_drift"
+
+
 def test_loaded_plan_does_not_allow_non_json_constants_or_unknown_fields(tmp_path):
     path = tmp_path / "invalid.json"
     for text in ('{"request_budget":NaN}', '{"kind":"endpoint_plan","unknown":true}'):

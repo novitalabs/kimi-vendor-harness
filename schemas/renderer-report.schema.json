@@ -1,0 +1,16 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","kind","status","vectors","vectors_sha256","results","problems","stderr","endpoint_requests"],
+  "properties":{
+    "schema_version":{"const":1},"kind":{"enum":["renderer_validation","renderer_report"]},
+    "status":{"enum":["passed","failed","blocked","execution_invalid"]},
+    "vectors":{"type":"string"},"vectors_sha256":{"type":["string","null"]},
+    "results":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","status","problems","first_difference"],"properties":{
+      "id":{"type":"string"},"status":{"enum":["passed","failed","validated"]},
+      "problems":{"type":"array","items":{"$ref":"problem.schema.json"}},"first_difference":{"type":["object","null"]}
+    }}},
+    "problems":{"type":"array","items":{"$ref":"problem.schema.json"}},
+    "stderr":{"type":"string"},"endpoint_requests":{"const":0}
+  }
+}

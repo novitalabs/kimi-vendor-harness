@@ -18,6 +18,7 @@
         "service_invalid",
         "execution_invalid",
         "unsupported",
+        "contract_unknown",
         "not_run"
       ]
     },
@@ -68,6 +69,31 @@
     },
     "evidence": {
       "type": "string"
+    },
+    "role": {
+      "enum": [
+        "gate",
+        "diagnostic",
+        "observation",
+        "platform"
+      ]
+    },
+    "stage": {
+      "enum": [
+        "protocol",
+        "tooling",
+        "conversation",
+        "robustness",
+        "regression"
+      ]
+    },
+    "obligation": {
+      "enum": [
+        "required",
+        "optional",
+        "unknown",
+        "not_applicable"
+      ]
     }
   },
   "required": [

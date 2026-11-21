@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -48,8 +49,19 @@ def results_root(root: Path | None = None) -> Path:
     return Path(configured).expanduser().resolve() if configured else (root or workspace_root()).resolve() / "runs"
 
 
+def strict_json(text: str) -> Any:
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-JSON constant: {value}")
+    def finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("JSON number exceeds finite range")
+        return number
+    return json.loads(text, parse_constant=reject_constant, parse_float=finite_float)
+
+
 def canonical_hash(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def find_secret(value: Any, *, path: str = "$", allowed_text: frozenset[str] = frozenset()) -> str | None:
@@ -124,9 +136,10 @@ class ServiceAccess:
     @classmethod
     def load(cls, path: Path) -> "ServiceAccess":
         try:
-            return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError) as exc:
+            value = strict_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
             raise ConfigError("service_access_invalid", f"cannot read access contract: {path}") from exc
+        return cls.from_dict(value)
 
     def credential(self) -> str:
         return os.environ.get(self.api_key_env, "")

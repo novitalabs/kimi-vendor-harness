@@ -17,7 +17,8 @@ def completion(content="OK", *, calls=None, finish="stop", usage=None):
     message = {"role": "assistant", "content": content}
     if calls is not None:
         message["tool_calls"] = calls
-    return {"choices": [{"index": 0, "message": message, "finish_reason": finish}],
+    return {"id": "chatcmpl-test", "model": "fake", "object": "chat.completion", "created": 0,
+            "choices": [{"index": 0, "message": message, "finish_reason": finish}],
             "usage": usage or {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}}
 
 
@@ -37,7 +38,7 @@ def stream_frames():
 
 
 def sse(frames, done=True):
-    return "\n\n".join("data: " + json.dumps(item) for item in frames) + ("\n\ndata: [DONE]\n\n" if done else "\n\n")
+    return "\n\n".join("data: " + json.dumps({"id": "chatcmpl-test", "model": "fake", "object": "chat.completion.chunk", "created": 0, **item}) for item in frames) + ("\n\ndata: [DONE]\n\n" if done else "\n\n")
 
 
 def test_parse_stream_merges_tool_deltas_and_requires_done():
@@ -255,3 +256,56 @@ def test_fixture_preserves_non_runner_fields_and_stream_options(tmp_path, servic
     assert {key: wire[key] for key in request if key != "stream_options"} == {key: request[key] for key in request if key != "stream_options"}
     assert wire["stream_options"] == {"include_internal_content": True, "include_usage": True}
     assert set(wire) - set(request) == {"model", "stream", "max_tokens"}
+
+
+@pytest.mark.parametrize("text", ["before\u2028after", "before\u2029after", "before\u0085after"])
+@pytest.mark.parametrize("separator", ["\n", "\r", "\r\n"])
+def test_sse_only_splits_protocol_newlines_not_unicode(text, separator):
+    frames = [{"choices": [{"index": 0, "delta": {"role": "assistant", "content": text}, "finish_reason": None}]},
+              {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}]
+    raw = sse(frames).replace("\\u2028", "\u2028").replace("\\u2029", "\u2029").replace("\\u0085", "\u0085").replace("\n", separator)
+    reply = parse_reply(200, raw, stream=True)
+    assert reply.content == text
+    assert not reply.errors
+
+
+@pytest.mark.parametrize("arguments", ["null", "[]", "true", "7", '"string"'])
+def test_generated_tool_arguments_require_objects(arguments):
+    reply = parse_reply(200, json.dumps(completion(calls=[tool_call(arguments=arguments)], finish="tool_calls")), stream=False)
+    assert "arguments_object_required" in {p["code"] for p in assert_reply(reply, {"status": 200, "arguments_json": True}, [])}
+
+
+def test_illegal_finish_envelope_and_truncation_preserve_known_protocol_failure():
+    reply = parse_reply(200, json.dumps(completion("{}", finish="bogus")), stream=False)
+    assert "finish_reason_invalid" in {p["code"] for p in assert_reply(reply, {"status": 200}, [])}
+    body = completion("OK")
+    del body["id"]
+    assert parse_reply(200, json.dumps(body), stream=False).errors
+    broken = parse_reply(200, json.dumps(completion([], finish="length")), stream=False)
+    problems = assert_reply(broken, {"status": 200}, [])
+    assert runtime._outcome(broken, {"status": 200}, problems)[0] == "failed"
+
+
+def test_incomplete_generation_does_not_hide_observed_marker_or_disabled_reasoning():
+    value = completion("<|close|>message<|sep|>", finish="length")
+    value["choices"][0]["message"]["reasoning_content"] = "leaked"
+    reply = parse_reply(200, json.dumps(value), stream=False)
+    expect = {"status": 200, "reasoning": False, "no_marker_leak": True}
+    problems = assert_reply(reply, expect, [])
+    assert {"marker_leaked", "reasoning_presence_mismatch"} <= {p["code"] for p in problems}
+    assert runtime._outcome(reply, expect, problems)[0] == "failed"
+    filtered = parse_reply(200, json.dumps(completion("", finish="content_filter")), stream=False)
+    problems = assert_reply(filtered, {"status": 200, "public_turn": True}, [])
+    assert runtime._outcome(filtered, {"status": 200}, problems)[0] == "inconclusive"
+
+
+def test_canonical_thinking_materializes_dialect_but_raw_conflicts_are_preserved(tmp_path, service):
+    from dataclasses import replace
+    step = {"request": {"messages": [{"role": "user", "content": "OK"}]}, "thinking": False}
+    assert materialize_step(step, {"max_output_tokens": 64}, service, "nonstream", tmp_path)["reasoning_effort"] == "none"
+    wire = materialize_step(step, {"max_output_tokens": 64}, replace(service, think_mode="kimi"), "nonstream", tmp_path)
+    assert wire["thinking"] == {"type": "disabled"} and "reasoning_effort" not in wire
+    raw = {"request": {**step["request"], "thinking": {"type": "enabled", "effort": "low"}, "reasoning_effort": "max"}}
+    assert materialize_step(raw, {"max_output_tokens": 64}, service, "nonstream", tmp_path)["reasoning_effort"] == "max"
+    with pytest.raises(ConfigError):
+        materialize_step({**raw, "thinking": False}, {"max_output_tokens": 64}, service, "nonstream", tmp_path)

@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "kind": {
       "const": "endpoint_report"
@@ -58,6 +58,72 @@
     },
     "disclaimer": {
       "type": "string"
+    },
+    "gate_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "required_cases",
+        "failures",
+        "gaps",
+        "result_counts",
+        "role_counts",
+        "scope"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "incomplete",
+            "not_selected"
+          ]
+        },
+        "required_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "result_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "role_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "scope": {
+          "type": "string"
+        }
+      }
+    },
+    "scenario_sha256": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      }
+    },
+    "target": {
+      "$ref": "service-access.schema.json"
     }
   },
   "required": [
@@ -71,6 +137,9 @@
     "planned_requests",
     "actual_requests",
     "results",
-    "disclaimer"
+    "disclaimer",
+    "gate_summary",
+    "scenario_sha256",
+    "target"
   ]
 }

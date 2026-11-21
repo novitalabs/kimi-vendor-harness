@@ -1,6 +1,6 @@
 [project]
 name = "kimi-agentic-harness"
-version = "0.5.0"
+version = "0.6.0"
 description = "Kimi agentic capability and regression test harness"
 readme = "README.md"
 license = { file = "LICENSE" }

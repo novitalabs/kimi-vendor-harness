@@ -13,7 +13,8 @@ DeepSWE or model-quality score benchmarks.
 - Keep official/KVV-derived cases small and adapted. Record original path,
   commit and adaptation in the case; never imply complete official coverage.
 - `kimi-harness` is the only installed test CLI: `plan`, `doctor`, `run`,
-  `parser validate`, and `parser run`. Do not add legacy command aliases.
+  `parser validate/run`, `renderer validate/run`, and offline `compare`.
+  Do not add legacy command aliases.
   `plan` and `doctor` are zero traffic. Endpoint runs require explicit
   `--execute`, a request ceiling and no implicit retries.
 - Separate endpoint cases, parser adapter vectors and harness-local unit tests.
@@ -26,6 +27,14 @@ DeepSWE or model-quality score benchmarks.
   artifacts before writing them.
 - Results belong under ignored `NVST_RESULTS_ROOT` (or the default ignored
   `runs/`). Do not write a repository-local environment or test output.
+- Target profiles define obligations (required/optional/unsupported/unknown), not
+  framework implementation progress. Missing claims are unknown and block bound
+  execution. `kimi-k31-pro` is a provisional blocked scaffold, not verified support.
+  Never weaken a required claim or oracle just to make a framework appear green.
+- For framework bring-up, read [docs/framework-bringup.md](docs/framework-bringup.md).
+  Treat gate summaries as selected required coverage only. Offline renderer
+  goldens must come from an independently pinned checkpoint encoder. Multi-turn
+  tests may bind validated calls to canned results, but never dispatch tools.
 - For code-agent invocation, read [docs/agent-use.md](docs/agent-use.md) first.
   Default outputs are schema-versioned JSON; branch on codes/status, not prose.
   Prefer target-bound `plan --out` → `doctor --plan` → `run --plan`.

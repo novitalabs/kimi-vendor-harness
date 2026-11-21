@@ -27,7 +27,8 @@ def completion(content="OK", *, calls=None, finish=None, usage=None):
     message = {"role": "assistant", "content": content}
     if calls is not None:
         message["tool_calls"] = calls
-    return {"choices": [{"index": 0, "message": message,
+    return {"id": "chatcmpl-test", "model": "fake", "object": "chat.completion", "created": 0,
+            "choices": [{"index": 0, "message": message,
                          "finish_reason": finish or ("tool_calls" if calls else "stop")}],
             "usage": usage or {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}}
 
@@ -47,7 +48,7 @@ def frames():
 
 
 def sse(chunks, done=True):
-    return "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + ("data: [DONE]\n\n" if done else "")
+    return "".join("data: " + json.dumps({"id": "chatcmpl-test", "model": "fake", "object": "chat.completion.chunk", "created": 0, **chunk}) + "\n\n" for chunk in chunks) + ("data: [DONE]\n\n" if done else "")
 
 
 def send(handler, status=200, body=None, *, raw=None, stream=False):
@@ -353,6 +354,102 @@ def test_frozen_run_lowered_budget_and_missing_opt_in_ack_send_nothing(endpoint,
             assert error["error"]["code"] == expected
             assert error["endpoint_requests"] == 0
         assert not requests
+
+
+def test_invalid_utf8_retains_offsets_hash_and_timing_and_never_passes(endpoint):
+    def respond(handler, request, n):
+        payload = json.dumps(completion("replacement")).encode().replace(b"replacement", b"bad\xff")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+    with endpoint(respond) as (access, requests):
+        report = runtime.run_plan(catalog_plan("reasoning.disabled"), access, max_requests=1)
+        assert report["status"] == "failed"
+        value = evidence(report)["response"]
+        assert value["invalid_utf8"][0]["bytes_hex"] == "ff"
+        assert value["raw_bytes_sha256"]
+        assert value["timing"]["received_bytes"] > 0
+        assert value["timing"]["elapsed_seconds"] >= value["timing"]["first_byte_seconds"]
+
+
+def test_actual_service_call_identity_binds_to_canned_followup_and_is_frozen(endpoint):
+    from novita_self_test.execution_plan import create_plan
+    def respond(handler, request, n):
+        followup = request["tool_choice"] == "none"
+        if followup:
+            previous = request["messages"][-3]
+            result = request["messages"][-2]
+            assert previous["role"] == "assistant"
+            assert previous["tool_calls"][0]["id"] == "actual_generated_77"
+            assert result["tool_call_id"] == "actual_generated_77"
+            assert "WEATHER_OK" in result["content"]
+            if request["stream"]:
+                send(handler, stream=True, raw=sse([
+                    {"choices": [{"index": 0, "delta": {"role": "assistant", "content": '{"verification_code":"WEATHER_OK"}'}, "finish_reason": None}]},
+                    {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}]))
+            else:
+                send(handler, body=completion('{"verification_code":"WEATHER_OK"}'))
+        elif request["stream"]:
+            chunks = frames()
+            chunks[1]["choices"][0]["delta"]["tool_calls"][0]["id"] = "actual_generated_77"
+            send(handler, stream=True, raw=sse(chunks))
+        else:
+            send(handler, body=completion(calls=[call(id="actual_generated_77")]))
+    with endpoint(respond) as (access, requests):
+        plan = create_plan(model="kimi-k3", selectors=["conversation_state.bound_tool_roundtrip"], service=access, max_requests=4)
+        assert plan["units"][1]["binding_sha256"]
+        report = runtime.run_plan(plan, access, max_requests=4)
+        assert report["status"] == "passed"
+        assert report["actual_requests"] == len(requests) == 4
+        assert evidence(report, 1)["request"]["messages"][-2]["tool_call_id"] == "actual_generated_77"
+
+
+def test_failed_parent_skips_bound_followup_without_spending_its_budget(endpoint):
+    with endpoint(lambda h, req, n: send(h, body=completion(calls=[call(name="wrong")]))) as (access, requests):
+        plan = catalog_plan("conversation_state.bound_tool_roundtrip")
+        plan["cases"][0]["modes"] = ["nonstream"]
+        plan["request_budget"] = 2
+        report = runtime.run_plan(plan, access, max_requests=2)
+        assert report["status"] == "failed"
+        assert len(requests) == 1
+        assert report["results"][1]["status"] == "not_run"
+
+
+def test_failed_report_replans_whole_case_for_new_runtime_and_compares_offline(endpoint, tmp_path, capsys):
+    broken = True
+    def respond(handler, request, n):
+        if request["stream"]:
+            chunks = frames()
+            if broken:
+                chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] = "wrong"
+            send(handler, stream=True, raw=sse(chunks))
+        else:
+            send(handler, body=completion(calls=[call(name="wrong" if broken else "get_weather")]))
+    with endpoint(respond) as (access, requests):
+        path, plan_path = tmp_path / "access.json", tmp_path / "plan.json"
+        path.write_text(json.dumps(access.public_dict()))
+        assert main(["run", "--select", "tool_call.choice.required", "--service-access", str(path), "--max-requests", "2", "--execute"]) == 1
+        first = json.loads(capsys.readouterr().out)
+        before = Path(first["run_dir"]) / "report.json"
+        changed = access.public_dict()
+        changed["runtime_id"] = "synthetic-fixed-runtime"
+        path.write_text(json.dumps(changed))
+        assert main(["plan", "--failed-from", str(before), "--service-access", str(path), "--max-requests", "2", "--out", str(plan_path)]) == 0
+        plan = json.loads(capsys.readouterr().out)
+        assert [case["id"] for case in plan["cases"]] == ["tool_call.choice.required"]
+        assert len(requests) == 2
+        broken = False
+        assert main(["run", "--plan", str(plan_path), "--service-access", str(path), "--execute"]) == 0
+        second = json.loads(capsys.readouterr().out)
+        after = Path(second["run_dir"]) / "report.json"
+        assert len(requests) == 4
+        assert main(["compare", "--baseline", str(before), "--candidate", str(after)]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["changes"][0]["transition"] == "fixed"
+        assert result["endpoint_requests"] == 0
+        assert len(requests) == 4
 
 
 def test_opt_in_requires_ack_before_any_http(endpoint):

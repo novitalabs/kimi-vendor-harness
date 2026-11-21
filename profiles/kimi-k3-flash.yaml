@@ -1,30 +1,97 @@
-schema_version: 1
+schema_version: 2
 model_id: kimi-k3-flash
 family: kimi-k3
 status: ready
-efforts: [max]
 features:
-  - protocol
-  - tool_call
-  - tool_call.schema
-  - tool_call.choice.none
-  - tool_call.choice.auto
-  - tool_call.choice.required
-  - tool_call.dynamic_tools
-  - platform.dynamic_tool_validation
-  - structured_output
-  - structured_output.text
-  - structured_output.json_object
-  - structured_output.json_schema
-  - reasoning
-  - reasoning.disable
-  - streaming
-  - prompt_rendering
-  - usage
-  - conversation_state
-  - multimodal
-  - error_handling
+  protocol:
+    expectation: required
+    evidence: &id001
+    - sources/provenance.yaml#kvv_k3_flash_feature_branch
+    - git:2eb673d:profiles/kimi-k3-flash.yaml
+  tool_call:
+    expectation: required
+    evidence: *id001
+  tool_call.schema:
+    expectation: required
+    evidence: *id001
+  tool_call.choice.none:
+    expectation: required
+    evidence: *id001
+  tool_call.choice.auto:
+    expectation: required
+    evidence: *id001
+  tool_call.choice.required:
+    expectation: required
+    evidence: *id001
+  tool_call.dynamic_tools:
+    expectation: required
+    evidence: *id001
+  platform.dynamic_tool_validation:
+    expectation: optional
+    evidence: *id001
+  structured_output:
+    expectation: required
+    evidence: *id001
+  structured_output.text:
+    expectation: required
+    evidence: *id001
+  structured_output.json_object:
+    expectation: required
+    evidence: *id001
+  structured_output.json_schema:
+    expectation: required
+    evidence: *id001
+  reasoning:
+    expectation: required
+    evidence: *id001
+  reasoning.disable:
+    expectation: required
+    evidence: *id001
+  streaming:
+    expectation: required
+    evidence: *id001
+  prompt_rendering:
+    expectation: required
+    evidence: *id001
+  usage:
+    expectation: required
+    evidence: *id001
+  conversation_state:
+    expectation: required
+    evidence: *id001
+  multimodal:
+    expectation: unknown
+    evidence: []
+  error_handling:
+    expectation: required
+    evidence: *id001
+efforts:
+  low:
+    expectation: unsupported
+    evidence: *id001
+  medium:
+    expectation: unsupported
+    evidence: *id001
+  high:
+    expectation: unsupported
+    evidence: *id001
+  max:
+    expectation: required
+    evidence: *id001
+authority:
+  checkpoint: null
+  encoder: null
+  tokenizer: null
+  api_contract: sources/provenance.yaml#kvv_k3_flash_feature_branch
+  stream_protocol: kimi-stream-244
+  unknowns:
+  - Checkpoint-specific token identities and encoder parity are not certified by this
+    API feature profile.
+  - Multimodal endpoint coverage is not implemented.
 notes:
-  - Max-only effort applicability follows the pinned Flash profile; unsupported effort probes are shown but not executed.
-  - Dynamic-tool validation probes target the pinned KVV platform contract, not generic OpenAI rules; they require --allow-opt-in.
-  - This profile describes capability applicability, not verified endpoint support or model quality.
+- Max-only effort applicability follows the pinned Flash profile; unsupported effort
+  probes are shown but not executed.
+- Dynamic-tool validation probes target the pinned KVV platform contract, not generic
+  OpenAI rules; they require --allow-opt-in.
+- This profile describes capability applicability, not verified endpoint support or
+  model quality.

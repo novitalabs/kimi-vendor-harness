@@ -18,7 +18,8 @@ def reply(*, content="", name=None, arguments="{}"):
     message = {"role": "assistant", "content": content}
     if name is not None:
         message["tool_calls"] = [{"id": "call_0", "type": "function", "function": {"name": name, "arguments": arguments}}]
-    return parse_reply(200, json.dumps({"choices": [{"index": 0, "message": message,
+    return parse_reply(200, json.dumps({"id": "chatcmpl-test", "model": "fake", "created": 0, "object": "chat.completion",
+        "choices": [{"index": 0, "message": message,
         "finish_reason": "tool_calls" if name else "stop"}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}), stream=False)
 
@@ -48,6 +49,19 @@ def test_first_call_only_never_exempts_later_undeclared_names():
     actual.calls.append({"id": "call_1", "name": "unknown", "arguments": "{}"})
     problems = assert_reply(actual, {"status": 200, "first_call_only": True, "tool_names": ["get_weather"]}, [])
     assert any(problem["code"] == "tool_name_undeclared" for problem in problems)
+
+
+def test_first_call_only_never_exempts_later_non_object_arguments():
+    actual = reply(name="get_weather")
+    actual.calls.append({"id": "call_1", "name": "get_weather", "arguments": "null"})
+    problems = assert_reply(actual, {"status": 200, "first_call_only": True}, [])
+    assert "arguments_object_required" in {p["code"] for p in problems}
+
+
+def test_history_required_case_rejects_unrelated_text():
+    case = next(case for case in load_cases(ROOT) if case["id"] == "conversation_state.tool_result_history")
+    problems = assert_reply(reply(content="unrelated"), case["steps"][0]["expect"], [])
+    assert "tool_call_missing" in {p["code"] for p in problems}
 
 
 def test_marker_and_conflict_probes_are_observations_not_engine_passes(tmp_path, monkeypatch):

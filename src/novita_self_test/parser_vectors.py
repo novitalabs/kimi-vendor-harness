@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from .config import strict_json
 
 REQUIRED_EXPECTED = {"reasoning", "content", "tool_calls"}
 
@@ -27,6 +28,8 @@ def validate_case(case: Any, line: int) -> list[str]:
         errors.append(f"{prefix}: text must be XTML containing <|open|>")
     if "finish" in case and case["finish"] not in ("stop", "length"):
         errors.append(f"{prefix}: finish must be stop or length")
+    if case.get("comparison") not in {"json", "bytes"}:
+        errors.append(f"{prefix}: comparison must explicitly be json or bytes")
     chunks = case.get("chunks")
     if not isinstance(chunks, list) or not chunks or not all(
         (type(v) is int and v > 0) or v == "all" for v in chunks
@@ -59,13 +62,13 @@ def load_vectors(path: Path) -> list[dict[str, Any]]:
     vectors: list[dict[str, Any]] = []
     seen: set[str] = set()
     errors: list[str] = []
-    for line, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line, raw in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1):
         if not raw.strip():
             continue
         try:
-            case = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            errors.append(f"line {line}: invalid JSON: {exc.msg}")
+            case = strict_json(raw)
+        except ValueError as exc:
+            errors.append(f"line {line}: invalid JSON: {exc}")
             continue
         errors.extend(validate_case(case, line))
         if isinstance(case, dict):

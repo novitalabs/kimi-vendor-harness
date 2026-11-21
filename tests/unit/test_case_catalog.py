@@ -50,14 +50,14 @@ def test_long_history_oracle_matches_fixture_metadata() -> None:
 def test_profile_capabilities_gate_cases() -> None:
     flash = build_plan(select_cases(load_cases(ROOT), ["reasoning.precedence"]), model="kimi-k3-flash", root=ROOT)
     assert flash["request_budget"] == 0
-    assert "effort:low" in flash["cases"][0]["missing_requirements"]
+    assert "effort:low:unsupported" in flash["cases"][0]["missing_requirements"]
 
 
 def test_flash_keeps_all_top_level_capabilities_and_gates_only_low_effort() -> None:
     plan = build_plan(load_cases(ROOT), model="kimi-k3-flash", root=ROOT)
     assert not any(item.startswith("feature:") and "platform." not in item
                    for case in plan["cases"] for item in case["missing_requirements"])
-    assert {case["id"] for case in plan["cases"] if "effort:low" in case["missing_requirements"]} == {
+    assert {case["id"] for case in plan["cases"] if "effort:low:unsupported" in case["missing_requirements"]} == {
         "reasoning.precedence", "streaming.public_turn"
     }
 

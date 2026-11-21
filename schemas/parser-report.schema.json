@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "kind": {
       "enum": [
@@ -84,7 +84,13 @@
           "expected": {
             "type": "object"
           },
-          "actual": {}
+          "actual": {},
+          "comparison": {
+            "enum": [
+              "json",
+              "bytes"
+            ]
+          }
         },
         "required": [
           "id",

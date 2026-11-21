@@ -53,12 +53,22 @@ wire settings and request/oracle hashes; `doctor --plan` verifies it, and
 evidence, not authorization. Machine results and stable problem codes are
 specified by `schemas/` and [agent-use.md](agent-use.md).
 
-Model profiles declare the authoritative flat `features` and `efforts` contract.
-`plan`, `doctor` and `run` use the same applicability calculation;
-unsupported cases are shown before traffic and are not executed. K3.1 is not
-implicitly enabled: its checkpoint encoder/config/token ids and API differences
-must be verified first. A selected KVV case is a development contract, not proof
-of complete official coverage.
+Profile v2 feature/effort claims declare target obligations, not implementation
+progress: required, optional, unsupported or unknown, with evidence for known
+claims. Missing claims are unknown; selected unknowns/provisional profiles block
+bound execution. The K3.1 Pro profile is a blocked scaffold and inherits no K3
+requirements. A selected KVV case is a development contract, not proof of complete
+official coverage. See [framework-bringup.md](framework-bringup.md).
+
+Every case has an independent role (`gate`, `diagnostic`, `observation`,
+`platform`) and stage (`protocol`, `tooling`, `conversation`, `robustness`,
+`regression`). Select with `role:`/`stage:`; multiple selectors remain a union.
+The gate summary only covers selected required gates; it never hides diagnostic
+failures, observations, incomplete evidence or unimplemented coverage.
+Renderer token-id comparisons are a separate offline component layer. Bounded
+response-binding scenarios consume prior validated call identities and fixed
+canned tool results, never execute generated tool calls. Replanning selects the
+whole case so dependencies stay intact; comparison is local-only.
 
 ## Learning loop
 
@@ -70,7 +80,7 @@ of complete official coverage.
    confirmed cause, fix and versioned evidence.
 
 The default smoke plan is 9 cases / 13 requests. The current endpoint catalog
-has 58 cases; explicit `opt_in` acknowledgement is required for long-history
+has 59 cases; explicit `opt_in` acknowledgement is required for long-history
 and platform-specific negative probes. Parser vectors are separate: 7 vectors
 and 21 offline chunk trials, with no bundled engine adapter. See
 `docs/migration.md` and `sources/provenance.yaml` for the retained/extracted

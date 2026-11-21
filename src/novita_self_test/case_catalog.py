@@ -12,7 +12,8 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from .config import ConfigError, canonical_hash, find_secret, safe_path, workspace_root
+from .config import ConfigError, canonical_hash, find_secret, safe_path, strict_json, workspace_root
+from .target_contract import applicability
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -39,7 +40,7 @@ def read_request(step: dict[str, Any], root: Path) -> dict[str, Any]:
         return copy.deepcopy(step["request"])
     path = safe_path(root, step["request_fixture"])
     try:
-        request = json.loads(path.read_text(encoding="utf-8"))
+        request = strict_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ConfigError("case_invalid", f"cannot read request fixture: {path}") from exc
     if not isinstance(request, dict):
@@ -82,11 +83,11 @@ def load_cases(root: Path | None = None) -> list[dict[str, Any]]:
     sources = read_yaml(root / "sources/provenance.yaml").get("sources", {})
     cases, seen = [], set()
     for path in sorted((root / "capabilities").rglob("cases.jsonl")):
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
             if not line.strip():
                 continue
             try:
-                case = json.loads(line)
+                case = strict_json(line)
             except ValueError as exc:
                 raise ConfigError("case_invalid", f"{path}:{line_number}: invalid JSON") from exc
             errors = list(validator.iter_errors(case))
@@ -111,6 +112,16 @@ def load_cases(root: Path | None = None) -> list[dict[str, Any]]:
                 if "request_fixture" not in step and (secret := find_secret(request)):
                     raise ConfigError("credential_material_forbidden", f"{case['id']}: {secret}")
                 expect = step["expect"]
+                if "thinking" in step and any(key in request for key in ("thinking", "reasoning_effort")):
+                    raise ConfigError("case_invalid", "canonical thinking cannot be combined with raw fields")
+                if "effort" in step and not step.get("thinking"):
+                    raise ConfigError("case_invalid", "effort requires canonical thinking=true")
+                if "continue_from" in step:
+                    binding = step["continue_from"]
+                    if binding["step"] >= index or case["steps"][binding["step"]]["expect"]["status"] != 200:
+                        raise ConfigError("case_invalid", "continuation must reference a previous successful step")
+                    if len({row["name"] for row in binding["tool_results"]}) != len(binding["tool_results"]):
+                        raise ConfigError("case_invalid", "canned tool result names must be unique")
                 if "same_prompt_as" in expect and expect["same_prompt_as"] >= index:
                     raise ConfigError("case_invalid", "same_prompt_as must refer to an earlier step")
                 if "minimum_prompt_delta" in expect and not index:
@@ -150,6 +161,9 @@ def load_profile(model: str, root: Path | None = None) -> dict[str, Any]:
 
 
 def matches(case: dict[str, Any], selector: str) -> bool:
+    for prefix, key in (("role:", "role"), ("stage:", "stage")):
+        if selector.startswith(prefix):
+            return selector[len(prefix):] == case[key]
     for prefix, key in (("tag:", "tags"), ("component:", "likely_components")):
         if selector.startswith(prefix):
             return selector[len(prefix):] in case[key]
@@ -204,7 +218,9 @@ def request_features(request: dict[str, Any]) -> set[str]:
             required.add("tool_call.schema")
     if any(key in request for key in ("reasoning_effort", "thinking")):
         required.add("reasoning")
-    if any(isinstance(message.get("content"), list) for message in request.get("messages", []) if isinstance(message, dict)):
+    if any(isinstance(part, dict) and part.get("type") != "text"
+           for message in request.get("messages", []) if isinstance(message, dict) and isinstance(message.get("content"), list)
+           for part in message["content"]):
         required.add("multimodal")
     response_format = request.get("response_format")
     if isinstance(response_format, dict) and response_format.get("type") in {"text", "json_object", "json_schema"}:
@@ -220,12 +236,12 @@ def build_plan(cases: list[dict[str, Any]], *, model: str, repeat: int = 1,
         raise ConfigError("plan_invalid", "repeat must be a positive integer")
     root = root or workspace_root()
     profile = load_profile(model, root)
-    supported = set(profile["features"])
+    supported = {name for name, rule in profile["features"].items() if rule["expectation"] in {"required", "optional"}}
     entries = []
     for original in cases:
         case = copy.deepcopy(original)
         required = set(case.get("requires", [])) | {case["capability"].split("/", 1)[0]}
-        missing: list[str] = []
+        efforts: set[str] = set()
         for _, _, _, mode, step in iter_case_steps(case, 1):
             request = read_request(step, root)
             if mode == "stream":
@@ -242,15 +258,16 @@ def build_plan(cases: list[dict[str, Any]], *, model: str, repeat: int = 1,
                 required.add("reasoning")
             candidates = [step.get("effort"), request.get("reasoning_effort"), effort]
             for value in candidates:
-                if value and value != "none" and value not in profile["efforts"]:
-                    missing.append(f"effort:{value}")
-        missing.extend(f"feature:{value}" for value in sorted(required - supported))
+                if value and value != "none":
+                    efforts.add(value)
+        missing, obligation = applicability(profile, required, efforts)
         case["required_features"] = sorted(required)
+        case["obligation"] = obligation
         case.update(missing_requirements=sorted(set(missing)),
                     planned_requests=0 if missing else repeat * sum(1 for _ in iter_case_steps(case, 1)))
         entries.append(case)
     plan = {"schema_version": 1, "model": model, "profile_status": profile["status"],
-            "profile_notes": profile.get("notes", []), "repeat": repeat,
+            "profile_notes": profile.get("notes", []), "contract_authority": profile["authority"], "repeat": repeat,
             "enabled_features": sorted(supported), "concurrency": 1, "retries": 0,
             "request_budget": sum(case["planned_requests"] for case in entries),
             "max_output_tokens_budget": sum(case["planned_requests"] * case["max_output_tokens"] for case in entries),

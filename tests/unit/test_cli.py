@@ -23,10 +23,10 @@ def test_summary_and_json_share_model_applicability(capsys):
     options = ["--model", "kimi-k3-flash", "--select", "reasoning.precedence"]
     assert main(["plan", *options, "--format", "summary"]) == 0
     summary = capsys.readouterr().out
-    assert "reasoning.precedence | 0 requests | unsupported: effort:low" in summary
+    assert "reasoning.precedence | 0 requests | blocked: effort:low" in summary
     assert main(["plan", *options]) == 0
     plan = json.loads(capsys.readouterr().out)
-    assert plan["cases"][0]["missing_requirements"] == ["effort:low"]
+    assert plan["cases"][0]["missing_requirements"] == ["effort:low:unsupported"]
     assert plan["request_budget"] == 0
 
 
@@ -37,7 +37,7 @@ def test_plan_defaults_to_smoke_all_is_explicit_and_profile_is_validated(capsys)
     assert smoke["request_budget"] == 13
     assert main(["plan", "--select", "all"]) == 0
     cases = json.loads(capsys.readouterr().out)["cases"]
-    assert len(cases) == 58
+    assert len(cases) == 59
     assert any("smoke" not in case["tags"] for case in cases)
     assert all(case["scope"] == "endpoint" for case in cases)
     assert main(["plan", "--model", "missing-profile"]) == 2

@@ -26,6 +26,8 @@ def test_all_output_schema_definitions_are_valid():
     (["doctor"], "doctor.schema.json", 0),
     (["doctor", "--max-requests", "0"], "doctor.schema.json", 2),
     (["parser", "validate"], "parser-report.schema.json", 0),
+    (["renderer", "validate", "--vectors", "/missing.jsonl"], "renderer-report.schema.json", 2),
+    (["compare", "--baseline", "/missing.json", "--candidate", "/missing.json"], "error.schema.json", 2),
     (["parser", "validate", "--vectors", "/missing.jsonl"], "parser-report.schema.json", 2),
     (["list"], "error.schema.json", 2),
     (["run"], "error.schema.json", 2),

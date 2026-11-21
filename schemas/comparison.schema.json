@@ -1,0 +1,13 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema", "type":"object", "additionalProperties":false,
+ "required":["schema_version","kind","status","endpoint_requests","baseline_run","candidate_run","changes","retest_case_ids","warning"],
+ "properties":{
+  "schema_version":{"const":1},"kind":{"const":"report_comparison"},"status":{"enum":["passed","failed","incomplete"]},"endpoint_requests":{"const":0},
+  "baseline_run":{"type":"string"},"candidate_run":{"type":"string"},
+  "changes":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","before","after","transition","candidate_evidence"],"properties":{
+   "id":{"type":"string"},"before":{"type":["string","null"]},"after":{"type":["string","null"]},
+   "transition":{"enum":["fixed","regressed","unchanged","changed_evidence","not_comparable"]},
+   "candidate_evidence":{"type":"array","items":{"type":"string"}}
+  }}},"retest_case_ids":{"type":"array","items":{"type":"string"}},"warning":{"type":"string"}
+ }
+}

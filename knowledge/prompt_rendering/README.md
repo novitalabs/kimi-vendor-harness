@@ -23,7 +23,10 @@ Token fixtures record original expected counts without automatic vLLM +3/+image
 corrections. Exact-oracle cases require an explicitly verified tokenizer revision
 and accounting convention; parity cases compare equivalent endpoint requests.
 K3.1 special ids and JSON literal rules remain unverified until its checkpoint
-is pinned. A future renderer adapter should compare full token-id sequences
-offline; none is supplied here. `prompt_rendering.literal_markers` is an endpoint
+is pinned. `kimi-harness renderer run --vectors ... --adapter ...` compares
+full token-id sequences from independently pinned checkpoint goldens and reports
+the first difference. The protocol/neutral bridge is supplied, but no actual
+K3.1 Pro goldens, checkpoint artifacts or certified framework encoder is bundled.
+See `docs/framework-bringup.md`. `prompt_rendering.literal_markers` is an endpoint
 usage observation only and returns `observed`, even if its usage integers are
 valid. It does not establish that literal markers stayed ordinary text.

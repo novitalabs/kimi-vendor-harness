@@ -19,6 +19,10 @@ are protocol boundaries.
 
 These vectors are framework-adapter tests, not endpoint tests. A model endpoint
 cannot be forced to emit the exact token sequence of a parser regression.
+Vectors explicitly choose typed JSON-value equivalence or raw argument-byte
+preservation; key order/whitespace is not a typed semantic failure. Generated
+function arguments must be JSON objects, even though historical malformed or
+non-object inputs remain valid renderer-regression material.
 
 ## Likely implementation components
 

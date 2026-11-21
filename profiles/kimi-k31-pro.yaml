@@ -1,0 +1,21 @@
+schema_version: 2
+model_id: kimi-k31-pro
+family: kimi-k31
+status: provisional
+features: {}
+efforts: {}
+authority:
+  checkpoint: null
+  encoder: null
+  tokenizer: null
+  api_contract: null
+  stream_protocol: null
+  unknowns:
+  - Obtain the target K3.1 Pro checkpoint/config/tokenizer/encoder revision and hashes.
+  - Verify target API/tool/reasoning/schema rules and stream dialect before enabling
+    endpoint execution.
+  - No K3/K3-Flash token ids, effort support or platform policy is inherited.
+notes:
+- Bring-up scaffold only. Missing claims are unknown, not unsupported or implemented.
+- Populate evidence-backed expectations after checking authoritative sources; do not
+  remove required claims to hide implementation defects.

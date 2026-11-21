@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import math
 import os
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,11 +16,16 @@ from typing import Any
 
 import httpx
 from .case_catalog import iter_case_steps, read_request
-from .config import ConfigError, ServiceAccess, canonical_hash, redact, results_root, workspace_root
+from .config import ConfigError, ServiceAccess, canonical_hash, redact, results_root, strict_json, workspace_root
 from .contracts import issue, oracle_validator, validate_contract
+from .target_contract import gate_summary
+from .scenario_binding import bind_request
+from .report_comparison import scenario_identity
 
 MARKERS = ("<|open|>", "<|close|>", "<|sep|>", "<|end_of_msg|>")
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+FINISH_REASONS = {"stop", "length", "tool_calls", "content_filter"}
+INCOMPLETE_ERRORS = {"missing finish_reason", "missing DONE marker", "expected one finish frame, observed 0", "empty SSE stream"}
 SAFE_HEADERS = {
     "content-type", "date", "server", "traceparent", "x-request-id", "x-trace-id",
     "msh-request-id", "x-msh-trace-id", "x-moongate-request-id", "x-msh-providerdeployid",
@@ -73,17 +80,9 @@ class Reply:
     done: bool = False
     incomplete: bool = False
     errors: list[str] = field(default_factory=list)
-
-
-def strict_json(text: str) -> Any:
-    def reject_constant(value: str) -> None:
-        raise ValueError(f"non-JSON constant: {value}")
-    def finite_float(value: str) -> float:
-        number = float(value)
-        if not math.isfinite(number):
-            raise ValueError("JSON number exceeds finite range")
-        return number
-    return json.loads(text, parse_constant=reject_constant, parse_float=finite_float)
+    raw_bytes_sha256: str | None = None
+    invalid_utf8: list[dict[str, Any]] = field(default_factory=list)
+    timing: dict[str, Any] = field(default_factory=dict)
 
 
 def _text(value: Any, label: str, errors: list[str]) -> str:
@@ -126,7 +125,7 @@ def _capture_usage(reply: Reply, body: dict) -> None:
 
 def _sse_payloads(text: str) -> list[str]:
     events, parts = [], []
-    for line in text.splitlines():
+    for line in re.split(r"\r\n|\r|\n", text):
         if line == "":
             if parts:
                 events.append("\n".join(parts))
@@ -140,6 +139,16 @@ def _sse_payloads(text: str) -> list[str]:
     return events
 
 
+def _envelope(body: dict, *, stream: bool, errors: list[str]) -> None:
+    for key in ("id", "model"):
+        if not isinstance(body.get(key), str) or not body[key]:
+            errors.append(f"response envelope: {key} must be a nonempty string")
+    if body.get("object") != ("chat.completion.chunk" if stream else "chat.completion"):
+        errors.append("response envelope: unexpected object type")
+    if type(body.get("created")) is not int or body["created"] < 0:
+        errors.append("response envelope: created must be a nonnegative integer")
+
+
 def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str] | None = None) -> Reply:
     reply = Reply(status, text, headers=headers or {})
     if status != 200:
@@ -147,6 +156,7 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
     try:
         if not stream:
             body = _object(strict_json(text), "response")
+            _envelope(body, stream=False, errors=reply.errors)
             choices = _list(body.get("choices"), "choices")
             if len(choices) != 1:
                 raise ValueError("expected exactly one choice")
@@ -187,6 +197,7 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
                     reply.errors.append("DONE before finish frame")
                 continue
             chunk = _object(strict_json(payload), "chunk")
+            _envelope(chunk, stream=True, errors=reply.errors)
             reply.chunks.append(chunk)
             for key in ("id", "model", "created"):
                 if key in chunk:
@@ -270,7 +281,7 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
 
 
 def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *, mode: str | None = None) -> list[dict[str, Any]]:
-    problems = [issue("response_invalid", error) for error in reply.errors]
+    problems = [issue("response_incomplete" if error in INCOMPLETE_ERRORS else "response_invalid", error) for error in reply.errors]
     def add(code: str, message: str, expected: Any = None, actual: Any = None, path=None) -> None:
         problems.append(issue(code, message, expected=expected, actual=actual, path=path))
     if reply.status != expect["status"]:
@@ -285,8 +296,24 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
             add("error_envelope_invalid", "missing JSON error object")
     if reply.status != 200:
         return problems
+    if reply.finish_reason is not None and reply.finish_reason not in FINISH_REASONS:
+        add("finish_reason_invalid", "finish reason is outside the selected protocol", sorted(FINISH_REASONS), reply.finish_reason)
     if reply.finish_reason == "length" and not expect.get("allow_truncation"):
-        add("output_truncated", "output truncated: contract is inconclusive")
+        add("output_truncated", "output truncated: generation-dependent contract is inconclusive")
+    uncertain = reply.finish_reason is None or (reply.finish_reason == "length" and not expect.get("allow_truncation")) or (reply.finish_reason == "content_filter" and expect.get("finish_reason") != "content_filter")
+    if reply.finish_reason == "content_filter" and expect.get("finish_reason") != "content_filter":
+        add("generation_filtered", "generation was filtered; task contract is inconclusive")
+    if expect.get("no_marker_leak") and any(marker in reply.content for marker in MARKERS):
+        add("marker_leaked", "structural marker leaked into content")
+    if expect.get("reasoning") is False and reply.reasoning:
+        add("reasoning_presence_mismatch", "disabled reasoning was emitted", False, True)
+    # Preserve already observable wire failures; don't judge unfinished JSON/turns.
+    if uncertain:
+        if expect.get("tools") == "none" and reply.calls:
+            add("tool_call_forbidden", "tool_choice none returned calls", 0, len(reply.calls))
+        for index, call in enumerate(reply.calls):
+            if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
+                add("tool_name_undeclared", "undeclared/unexpected tool", expect["tool_names"], call.get("name"), ["calls", index, "name"])
         return problems
     if expect.get("finish_reason") and reply.finish_reason != expect["finish_reason"]:
         add("finish_reason_mismatch", "finish reason differs", expect["finish_reason"], reply.finish_reason)
@@ -298,12 +325,10 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
         add("tool_call_missing", "required tool call missing")
     if "max_calls" in expect and len(reply.calls) > expect["max_calls"]:
         add("tool_call_count_exceeded", "too many tool calls", expect["max_calls"], len(reply.calls))
-    if "reasoning" in expect and bool(reply.reasoning) != expect["reasoning"]:
-        add("reasoning_presence_mismatch", "reasoning presence differs from contract", expect["reasoning"], bool(reply.reasoning))
+    if expect.get("reasoning") is True and not reply.reasoning:
+        add("reasoning_presence_mismatch", "reasoning presence differs from contract", True, False)
     if expect.get("stream_shape") and not reply.chunks:
         add("stream_empty", "stream response has no parsed chunks")
-    if expect.get("no_marker_leak") and any(marker in reply.content for marker in MARKERS):
-        add("marker_leaked", "structural marker leaked into content")
     for value in expect.get("content_contains", []):
         if value not in reply.content:
             add("content_literal_missing", "content missing requested literal", value, reply.content)
@@ -317,24 +342,23 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
             add("tool_name_empty", "empty tool name", actual=call.get("name"), path=["calls", index, "name"])
         if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
             add("tool_name_undeclared", "undeclared/unexpected tool", expect["tool_names"], call.get("name"), ["calls", index, "name"])
-    calls = reply.calls[:1] if expect.get("first_call_only") else reply.calls
-    for index, call in enumerate(calls):
-        if expect.get("arguments_nonempty") and not call.get("arguments"):
-            add("arguments_empty", "tool-call arguments are empty")
-        if expect.get("arguments_json") or "arguments_schema" in expect:
-            try:
-                if not isinstance(call["arguments"], str) or not call["arguments"]:
-                    raise ValueError("missing JSON arguments")
-                value = strict_json(call["arguments"])
-                if "arguments_schema" in expect:
-                    for error in oracle_validator(expect["arguments_schema"]).iter_errors(value):
-                        add("arguments_schema_mismatch", error.message, error.validator_value, error.instance,
-                            ["calls", index, "arguments", *error.absolute_path])
-            except (ValueError, TypeError):
-                add("arguments_json_invalid", "arguments are not a nonempty valid JSON string", actual=call.get("arguments"))
-        if "forbidden_arguments" in expect and call["arguments"] == expect["forbidden_arguments"]:
+    for index, call in enumerate(reply.calls):
+        selected = index == 0 or not expect.get("first_call_only")
+        try:
+            if not isinstance(call["arguments"], str) or not call["arguments"]:
+                raise ValueError("missing JSON arguments")
+            value = strict_json(call["arguments"])
+            if not isinstance(value, dict):
+                add("arguments_object_required", "generated tool arguments must be a JSON object", "object", value)
+            if selected and "arguments_schema" in expect:
+                for error in oracle_validator(expect["arguments_schema"]).iter_errors(value):
+                    add("arguments_schema_mismatch", error.message, error.validator_value, error.instance,
+                        ["calls", index, "arguments", *error.absolute_path])
+        except (ValueError, TypeError):
+            add("arguments_json_invalid", "arguments are not a nonempty valid JSON string", actual=call.get("arguments"))
+        if selected and "forbidden_arguments" in expect and call["arguments"] == expect["forbidden_arguments"]:
             add("arguments_history_repeated", "arguments repeat forbidden history")
-        if "id_min_suffix" in expect:
+        if selected and "id_min_suffix" in expect:
             match = re.fullmatch(r".+_(\d+)", call.get("id") or "")
             if not match or int(match.group(1)) < expect["id_min_suffix"]:
                 add("tool_id_history_mismatch", "tool id suffix did not continue history", expect["id_min_suffix"], call.get("id"))
@@ -393,6 +417,8 @@ class CapabilityClient:
     async def _call(self, request: dict[str, Any]) -> Reply:
         status, headers, data = None, {}, bytearray()
         transport_error = None
+        started = datetime.now(timezone.utc).isoformat()
+        start_clock, first_byte = time.monotonic(), None
         try:
             async with asyncio.timeout(self.timeout):
                 async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=False) as client:
@@ -401,6 +427,8 @@ class CapabilityClient:
                         status = response.status_code
                         headers = safe_response_headers(dict(response.headers))
                         async for chunk in response.aiter_bytes():
+                            if first_byte is None:
+                                first_byte = time.monotonic() - start_clock
                             remaining = MAX_RESPONSE_BYTES - len(data)
                             data.extend(chunk[:remaining])
                             if len(chunk) > remaining:
@@ -408,7 +436,20 @@ class CapabilityClient:
                                 break
         except (httpx.HTTPError, TimeoutError) as exc:
             transport_error = f"transport failure: {type(exc).__name__}"
-        reply = parse_reply(status, data.decode("utf-8", errors="replace"), stream=bool(request.get("stream")), headers=headers) if status is not None else Reply(None)
+        invalid_utf8 = []
+        try:
+            text = data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            invalid_utf8.append({"start": exc.start, "end": exc.end, "bytes_hex": bytes(data[exc.start:exc.end]).hex()})
+            text = data.decode("utf-8", errors="replace")  # Display only, never a valid wire pass.
+        reply = parse_reply(status, text, stream=bool(request.get("stream")), headers=headers) if status is not None else Reply(None)
+        reply.raw_bytes_sha256 = hashlib.sha256(data).hexdigest()
+        reply.invalid_utf8 = invalid_utf8
+        reply.timing = {"started_at": started, "ended_at": datetime.now(timezone.utc).isoformat(),
+                        "elapsed_seconds": time.monotonic() - start_clock, "first_byte_seconds": first_byte,
+                        "received_bytes": len(data)}
+        if invalid_utf8:
+            reply.errors.append("response encoding: invalid UTF-8 bytes")
         if transport_error:
             reply.errors.append(transport_error)
             reply.incomplete = True
@@ -425,6 +466,8 @@ def materialize_step(step: dict[str, Any], case: dict[str, Any], service: Servic
     request.pop("max_completion_tokens", None)
     request[token_parameter()] = case["max_output_tokens"]
     if "thinking" in step:
+        if "thinking" in request or "reasoning_effort" in request:
+            raise ConfigError("case_invalid", "canonical thinking cannot be combined with raw thinking fields")
         enabled, effort = step["thinking"], step.get("effort")
         if service.think_mode == "opensource":
             request["reasoning_effort"] = (effort or "max") if enabled else "none"
@@ -446,7 +489,8 @@ def _outcome(reply: Reply, expect: dict[str, Any], problems: list[dict[str, Any]
         if failure == "service_unavailable" and 400 <= expect["status"] < 500:
             return "failed", failure
         return "execution_invalid", failure
-    if reply.incomplete or (reply.finish_reason == "length" and not expect.get("allow_truncation") and expect.get("finish_reason") != "length"):
+    uncertain = reply.incomplete or (reply.finish_reason == "length" and not expect.get("allow_truncation") and expect.get("finish_reason") != "length") or (reply.finish_reason == "content_filter" and expect.get("finish_reason") != "content_filter")
+    if uncertain and not any(problem["code"] not in {"response_incomplete", "output_truncated", "generation_filtered"} for problem in problems):
         return "inconclusive", None
     return ("failed" if problems else "passed"), None
 
@@ -468,6 +512,9 @@ def prepare_steps(plan: dict[str, Any], service: ServiceAccess, root: Path) -> l
                 if set(expect.get("tool_names", [])) - set(declared):
                     raise ConfigError("case_invalid", f"{case['id']}: oracle names an undeclared tool")
                 expect.setdefault("tool_names", declared)
+                expect.setdefault("arguments_json", True)
+                if request.get("tool_choice") in ("required", "none"):
+                    expect.setdefault("tools", request["tool_choice"])
             prepared.append((case, repeat, group, index, mode, step, request, expect))
     return prepared
 
@@ -511,15 +558,19 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
 
     save("plan.json", plan)
     save("service-access.json", service.public_dict())
-    results = [{"id": case["id"], "capability": case["capability"], "status": "unsupported",
+    results = [{"id": case["id"], "capability": case["capability"], "status": "contract_unknown" if any(value.endswith(":unknown") for value in case["missing_requirements"]) else "unsupported",
+                "role": case.get("role", "gate"), "stage": case.get("stage", "protocol"), "obligation": case.get("obligation", "required"),
                 "problems": [issue("requirement_missing", "case not applicable", actual=value) for value in case["missing_requirements"]], "knowledge": case["knowledge"],
                 "likely_components": case["likely_components"], "source": case["source"]}
                for case in plan["cases"] if case["missing_requirements"]]
     client, actual_requests, stop_reason = CapabilityClient(service, timeout=timeout), 0, None
     histories: dict[tuple[str, int, int], list[Reply]] = {}
+    sent_requests: dict[tuple[str, int, int], list[dict]] = {}
+    outcomes: dict[tuple[str, int, int], list[str]] = {}
     for case, repeat, group, index, mode, step, request, expect in prepared:
         result = {"id": case["id"], "capability": case["capability"], "repeat": repeat,
                   "group": group, "mode": mode, "step": index, "problems": [], "likely_components": case["likely_components"],
+                  "role": case.get("role", "gate"), "stage": case.get("stage", "protocol"), "obligation": case.get("obligation", "required"),
                   "knowledge": case["knowledge"], "source": case["source"]}
         evidence_name = f"{case['id']}-{repeat}-{group}-{mode}-{index}.json"
         if stop_reason or actual_requests >= max_requests:
@@ -527,35 +578,58 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
             result.update(status="not_run", problems=[issue("execution_stopped", "not run after a previous failure", actual=stop_reason)])
             results.append(result)
             continue
-        reply = None
-        history = histories.setdefault((case["id"], repeat, group), [])
+        reply, request_sent = None, False
+        template_hash = canonical_hash(request)
+        key = (case["id"], repeat, group)
+        history = histories.setdefault(key, [])
+        requests = sent_requests.setdefault(key, [])
+        statuses_before = outcomes.setdefault(key, [])
         try:
+            if "continue_from" in step:
+                previous_index = step["continue_from"]["step"]
+                if previous_index >= len(statuses_before) or statuses_before[previous_index] not in {"passed", "observed"}:
+                    raise ConfigError("scenario_dependency_invalid", "previous scenario step did not pass")
+                request = bind_request(request, step["continue_from"], history, requests)
             actual_requests += 1
+            request_sent = True
             reply = client.call(request)
             problems = assert_reply(reply, expect, history, mode=mode)
             status, failure = _outcome(reply, expect, problems)
             if status == "passed" and case.get("determinism") == "observation":
                 status = "observed"
             history.append(reply)
+            requests.append(request)
+            statuses_before.append(status)
             result.update(status=status, problems=problems, failure_class=failure)
             if failure:
                 stop_reason = failure
+        except ConfigError as exc:
+            # A failed dependency only blocks that turn, not unrelated scenarios.
+            if request_sent:
+                stop_reason = "runner_error"
+            history.append(reply if reply is not None else Reply(None))
+            requests.append(request)
+            statuses_before.append("execution_invalid" if request_sent else "not_run")
+            result.update(status="execution_invalid" if request_sent else "not_run", failure_class=exc.code, problems=[issue(exc.code, str(exc))])
         except Exception as exc:
             stop_reason = "runner_error"
             result.update(status="execution_invalid", failure_class="runner_error",
                           problems=[issue("runner_error", f"runner error: {type(exc).__name__}: {exc}")])
         result["evidence"] = evidence_name
-        evidence = redact({"schema_version": 1, "kind": "endpoint_evidence", "request": request,
+        evidence = redact({"schema_version": 2, "kind": "endpoint_evidence", "request": request,
                            "response": asdict(reply) if reply is not None else None, "expect": expect,
-                           "result": result, "request_sha256": canonical_hash(request)}, credential)
+                           "result": result, "request_sha256": canonical_hash(request), "request_sent": request_sent,
+                           "template_request_sha256": template_hash, "binding_sha256": canonical_hash(step.get("continue_from"))}, credential)
         validate_contract(evidence, "evidence.schema.json")
         save(evidence_name, evidence)
         results.append(result)
     statuses = {result["status"] for result in results}
     status = next((value for value in ("service_invalid", "execution_invalid", "failed") if value in statuses), None)
-    status = status or ("incomplete" if statuses & {"inconclusive", "unsupported", "not_run"} else "observed" if "observed" in statuses else "passed")
-    report = redact({"schema_version": 1, "kind": "endpoint_report", "status": status, "model": plan["model"], "run_dir": str(directory),
-                     "plan_sha256": plan.get("plan_sha256"),
+    status = status or ("incomplete" if statuses & {"inconclusive", "unsupported", "contract_unknown", "not_run"} else "observed" if "observed" in statuses else "passed")
+    report = redact({"schema_version": 2, "kind": "endpoint_report", "status": status, "model": plan["model"], "run_dir": str(directory),
+                     "plan_sha256": plan.get("plan_sha256"), "target": service.public_dict(),
+                     "gate_summary": gate_summary(plan["cases"], results, plan["repeat"]),
+                     "scenario_sha256": {case["id"]: scenario_identity(case, plan) for case in plan["cases"]},
                      "stop_reason": stop_reason, "planned_requests": expected_count, "actual_requests": actual_requests,
                      "results": results, "disclaimer": "Capability regression evidence; not a model-quality benchmark or vendor acceptance."}, credential)
     validate_contract(report, "report.schema.json")

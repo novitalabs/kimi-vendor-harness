@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 from pathlib import Path
@@ -10,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .case_catalog import build_plan, load_cases, load_profile, select_cases
 from .capability_runtime import MAX_RESPONSE_BYTES, prepare_steps, token_parameter
-from .config import ConfigError, ServiceAccess, canonical_hash, redact, safe_path, workspace_root
+from .config import ConfigError, ServiceAccess, canonical_hash, redact, safe_path, strict_json, workspace_root
 from .contracts import validate_contract
 
 NETWORK_ENV = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
@@ -49,7 +48,8 @@ def execution_config(*, max_requests: int, timeout: float) -> dict:
 
 def _unit_hashes(prepared: list[tuple]) -> list[dict]:
     return [{"id": case["id"], "repeat": repeat, "group": group, "step": index, "mode": mode,
-             "request_sha256": canonical_hash(request), "expect_sha256": canonical_hash(expect)}
+             "request_sha256": canonical_hash(request), "expect_sha256": canonical_hash(expect),
+             "binding_sha256": canonical_hash(step.get("continue_from"))}
             for case, repeat, group, index, mode, step, request, expect in prepared]
 
 
@@ -76,6 +76,9 @@ def _freeze(cases: list[dict], *, model: str, repeat: int, service: ServiceAcces
     # Hash before and after resolving fixtures so the plan never approves mixed bytes.
     before = _inputs(cases, model, root)
     producer = producer_identity(root)
+    current_cases = {case["id"]: case for case in load_cases(root)}
+    if any(case["id"] not in current_cases or current_cases[case["id"]] != case for case in cases):
+        raise ConfigError("plan_drift", "selected case snapshots changed before freezing; create a new plan")
     plan = build_plan(cases, model=model, repeat=repeat, root=root)
     if service is not None and service.model_family != model:
         raise ConfigError("model_mismatch", "service model_family does not match plan")
@@ -84,8 +87,9 @@ def _freeze(cases: list[dict], *, model: str, repeat: int, service: ServiceAcces
     prepared = prepare_steps(plan, service, root) if service is not None else []
     if before != _inputs(cases, model, root) or producer != producer_identity(root):
         raise ConfigError("plan_drift", "plan inputs changed during preparation; create a new plan")
-    plan.update(schema_version=2, kind="endpoint_plan", status="ready", producer=producer, inputs=before,
-                target=service.public_dict() if service else None, executable=service is not None,
+    plan.update(schema_version=3, kind="endpoint_plan", status="ready", producer=producer, inputs=before,
+                target=service.public_dict() if service else None,
+                executable=service is not None and not any(value.endswith(":unknown") for case in plan["cases"] for value in case["missing_requirements"]),
                 execution=config, units=_unit_hashes(prepared),
                 opt_in_cases=[case["id"] for case in plan["cases"] if "opt_in" in case["tags"] and not case["missing_requirements"]])
     if redact(plan) != plan or (service and service.credential() and redact(plan, service.credential()) != plan):
@@ -95,10 +99,7 @@ def _freeze(cases: list[dict], *, model: str, repeat: int, service: ServiceAcces
 
 def load_plan(path: Path) -> dict:
     try:
-        text = path.read_text(encoding="utf-8")
-        def reject(value):
-            raise ValueError(f"non-JSON constant {value}")
-        plan = json.loads(text, parse_constant=reject)
+        plan = strict_json(path.read_text(encoding="utf-8"))
         validate_contract(plan, "plan.schema.json")
     except (OSError, ValueError, ConfigError) as exc:
         raise ConfigError("plan_invalid", "cannot read a valid frozen plan") from exc
@@ -112,8 +113,10 @@ def verify_plan(plan: dict, service: ServiceAccess, *, root: Path | None = None)
         unsigned = {key: value for key, value in plan.items() if key != "plan_sha256"}
         if canonical_hash(unsigned) != plan["plan_sha256"]:
             raise ConfigError("plan_integrity_invalid", "plan hash differs from its content")
-        if not plan["executable"] or plan["target"] is None:
+        if plan["target"] is None:
             raise ConfigError("plan_target_required", "discovery-only plan cannot execute; plan again with --service-access")
+        if not plan["executable"]:
+            raise ConfigError("contract_unknown", "selected target requirements are unverified; resolve authoritative evidence before execution")
         if plan["target"] != service.public_dict():
             raise ConfigError("plan_target_mismatch", "public target identity changed; create a new plan")
         if plan["producer"] != producer_identity(root):

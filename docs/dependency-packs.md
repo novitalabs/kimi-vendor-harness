@@ -12,7 +12,8 @@ export NVST_HARNESS_PYTHON="$HOME/.cache/kimi-agentic-harness/venv/bin/python"
 ```
 
 The installed test command is `kimi-harness`. Endpoint tests use `plan`,
-`doctor`, and `run`; parser checks use `parser validate` and `parser run`.
+`doctor`, and `run`; component checks use `parser validate/run` and
+`renderer validate/run`; `compare` reads existing reports without traffic.
 The parser conformance adapter is supplied by the framework developer and is
 invoked explicitly. It is not an inference endpoint and has no shared venv
 contract. Updating with `uv sync --locked` also updates the installed command
