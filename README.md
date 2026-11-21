@@ -52,6 +52,8 @@ is secret-free; see `cases/service-access.example.json`.
 
 The `tests/` pytest suite is for **harness development**, not an alternative way
 to execute all endpoint cases. Its HTTP integration checks use loopback fakes.
+For code agents, start with [docs/agent-use.md](docs/agent-use.md): machine-output
+schemas, frozen-plan checks, authorization/stop rules and untrusted-data safety.
 
 ## Zero-traffic plan
 
@@ -80,7 +82,42 @@ requests in `run`. `doctor --service-access <file>` additionally validates the
 access file, matching model family, and credential environment variable; it does
 not contact the endpoint. `served_model` may be a deployment-specific alias.
 
-## Explicit endpoint run
+## Reviewed frozen-plan execution
+
+Planning is zero traffic and does not need a credential value. Add public access
+metadata to bind a target and make the plan executable:
+
+```bash
+kimi-harness plan \
+  --model kimi-k3 \
+  --select tool_call.choice.required \
+  --service-access cases/service-access.json \
+  --max-requests 2 --timeout 60 \
+  --out "$NVST_RESULTS_ROOT/required-plan.json"
+kimi-harness doctor \
+  --plan "$NVST_RESULTS_ROOT/required-plan.json" \
+  --service-access cases/service-access.json
+# Only after the caller approves this target/scope/aggregate request allowance:
+kimi-harness run \
+  --plan "$NVST_RESULTS_ROOT/required-plan.json" \
+  --service-access cases/service-access.json \
+  --execute
+```
+
+Plans without `--service-access` are discovery-only. Frozen plans bind harness
+source, schemas, case/profile/fixture bytes, exact request/oracle hashes, public
+target identity and execution settings. Detected drift/integrity mismatch rejects
+before traffic; hashes are not signatures or a protection against a caller
+creating/replacing a valid plan.
+`run --plan` forbids model/select/repeat/timeout overrides; `--max-requests` may
+only lower the frozen ceiling. A hash/plan/flag is not permission to execute;
+the caller must authorize and account for requests across runs. See the agent
+protocol for target-attestation limits and credential rotation.
+
+## Direct endpoint run
+
+For interactive use, direct selection creates a target-bound plan immediately
+before execution, with the same request ceilings and safety gates:
 
 ```bash
 kimi-harness run \
@@ -121,9 +158,16 @@ truncation normally yields an `inconclusive` case / `incomplete` report. Transpo
 interruptions yield `execution_invalid` and retain received bytes. The dedicated
 output-cap case allows intentional truncation and checks reported usage only.
 
-Run exit codes: **0** = passed; **1** = contract/assertion failure; **2** =
-configuration, service/execution invalid, unsupported/incomplete, or observation
-only. Inspect `report.json` for per-case status and the stop reason.
+Default stdout is one JSON document for every command, including argument and
+configuration errors. `--help` and `plan --format summary` are human views;
+stderr is diagnostic, not the result. Schemas are in `schemas/`: plan v2,
+report/evidence/doctor/parser/error v1. Problems have stable `code`, `message`,
+`expected`, `actual`, and `path` fields; agents must not parse message text.
+
+Run exit codes: **0** = passed/plan ready; **1** = contract/assertion failure;
+**2** = blocked, service/execution invalid, unsupported/incomplete, or observation
+only. Inspect JSON `kind`/`status`, per-case codes, and `stop_reason`. Reports
+include `plan_sha256`; evidence hashes refer to pre-redaction requests.
 
 ## Offline parser conformance
 
@@ -180,6 +224,16 @@ execution is a separate offline framework check.
   crash. Run only against a target where the selected negative probes are safe.
 
 ## Development
+
+A two-request local exercise of the complete agent workflow (no endpoint URL
+input, synthetic key, deliberately undeclared tool, no repair/retry) is available:
+
+```bash
+"$NVST_HARNESS_PYTHON" examples/agent-loopback.py --out /path/to/new/task-output
+```
+
+The example succeeds only when the expected contract failure is found and the
+report/evidence is linked. This is not a real-engine pass.
 
 Run the harness self-tests (unit, synthetic adapter, and loopback HTTP), not
 live endpoint acceptance:

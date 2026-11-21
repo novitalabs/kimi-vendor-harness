@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "error"
+    },
+    "command": {
+      "type": "string"
+    },
+    "status": {
+      "enum": ["blocked", "execution_invalid"]
+    },
+    "error": {
+      "$ref": "problem.schema.json"
+    },
+    "endpoint_requests": {
+      "type": ["integer", "null"], "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "command",
+    "status",
+    "error",
+    "endpoint_requests"
+  ]
+}

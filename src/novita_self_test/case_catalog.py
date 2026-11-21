@@ -247,7 +247,7 @@ def build_plan(cases: list[dict[str, Any]], *, model: str, repeat: int = 1,
         missing.extend(f"feature:{value}" for value in sorted(required - supported))
         case["required_features"] = sorted(required)
         case.update(missing_requirements=sorted(set(missing)),
-                    planned_requests=0 if missing else sum(1 for _ in iter_case_steps(case, repeat)))
+                    planned_requests=0 if missing else repeat * sum(1 for _ in iter_case_steps(case, 1)))
         entries.append(case)
     plan = {"schema_version": 1, "model": model, "profile_status": profile["status"],
             "profile_notes": profile.get("notes", []), "repeat": repeat,

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "endpoint_report"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "observed",
+        "failed",
+        "incomplete",
+        "service_invalid",
+        "execution_invalid"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "run_dir": {
+      "type": "string"
+    },
+    "plan_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stop_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "planned_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "actual_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "$ref": "case-result.schema.json"
+      }
+    },
+    "disclaimer": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "model",
+    "run_dir",
+    "plan_sha256",
+    "stop_reason",
+    "planned_requests",
+    "actual_requests",
+    "results",
+    "disclaimer"
+  ]
+}

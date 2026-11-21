@@ -46,7 +46,12 @@ and steps. `kimi-harness plan` reports request count and output-token budget;
 retries or official repeat waves. `doctor` and `plan` are zero traffic.
 `plan --format summary` lists selected cases; `plan --select all` explicitly
 inspects the full catalog. `parser validate` and `parser run` are separate
-offline commands under the same `kimi-harness` CLI.
+offline commands under the same `kimi-harness` CLI. For agent invocation,
+`plan --service-access ... --out ...` freezes the public target, input-file bytes,
+wire settings and request/oracle hashes; `doctor --plan` verifies it, and
+`run --plan` consumes only verified current snapshots. A plan hash is integrity
+evidence, not authorization. Machine results and stable problem codes are
+specified by `schemas/` and [agent-use.md](agent-use.md).
 
 Model profiles declare the authoritative flat `features` and `efforts` contract.
 `plan`, `doctor` and `run` use the same applicability calculation;

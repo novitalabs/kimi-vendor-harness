@@ -47,7 +47,7 @@ def test_first_call_only_never_exempts_later_undeclared_names():
     actual = reply(name="get_weather")
     actual.calls.append({"id": "call_1", "name": "unknown", "arguments": "{}"})
     problems = assert_reply(actual, {"status": 200, "first_call_only": True, "tool_names": ["get_weather"]}, [])
-    assert any("undeclared" in problem for problem in problems)
+    assert any(problem["code"] == "tool_name_undeclared" for problem in problems)
 
 
 def test_marker_and_conflict_probes_are_observations_not_engine_passes(tmp_path, monkeypatch):

@@ -13,10 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from jsonschema import Draft202012Validator
-
 from .case_catalog import iter_case_steps, read_request
 from .config import ConfigError, ServiceAccess, canonical_hash, redact, results_root, workspace_root
+from .contracts import issue, oracle_validator, validate_contract
 
 MARKERS = ("<|open|>", "<|close|>", "<|sep|>", "<|end_of_msg|>")
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
@@ -79,7 +78,12 @@ class Reply:
 def strict_json(text: str) -> Any:
     def reject_constant(value: str) -> None:
         raise ValueError(f"non-JSON constant: {value}")
-    return json.loads(text, parse_constant=reject_constant)
+    def finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("JSON number exceeds finite range")
+        return number
+    return json.loads(text, parse_constant=reject_constant, parse_float=finite_float)
 
 
 def _text(value: Any, label: str, errors: list[str]) -> str:
@@ -265,111 +269,116 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
     return reply
 
 
-def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *, mode: str | None = None) -> list[str]:
-    problems = list(reply.errors)
+def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *, mode: str | None = None) -> list[dict[str, Any]]:
+    problems = [issue("response_invalid", error) for error in reply.errors]
+    def add(code: str, message: str, expected: Any = None, actual: Any = None, path=None) -> None:
+        problems.append(issue(code, message, expected=expected, actual=actual, path=path))
     if reply.status != expect["status"]:
-        return problems + [f"status={reply.status}, expected={expect['status']}"]
+        add("http_status_mismatch", "HTTP status differs from contract", expect["status"], reply.status)
+        return problems
     if expect.get("error_object"):
         try:
             error = strict_json(reply.raw)["error"]
             if not isinstance(error, dict) or not isinstance(error.get("message"), str):
-                problems.append("error must contain a string message")
+                add("error_envelope_invalid", "error must contain a string message")
         except (ValueError, TypeError, KeyError):
-            problems.append("missing JSON error object")
+            add("error_envelope_invalid", "missing JSON error object")
     if reply.status != 200:
         return problems
     if reply.finish_reason == "length" and not expect.get("allow_truncation"):
-        return problems + ["output truncated: contract is inconclusive"]
+        add("output_truncated", "output truncated: contract is inconclusive")
+        return problems
     if expect.get("finish_reason") and reply.finish_reason != expect["finish_reason"]:
-        problems.append(f"finish_reason={reply.finish_reason!r}, expected={expect['finish_reason']!r}")
+        add("finish_reason_mismatch", "finish reason differs", expect["finish_reason"], reply.finish_reason)
     if expect.get("public_turn") and not (reply.content.strip() or reply.calls):
-        problems.append("empty public turn")
+        add("public_turn_empty", "empty public turn")
     if expect.get("tools") == "none" and reply.calls:
-        problems.append("tool_choice none returned calls")
+        add("tool_call_forbidden", "tool_choice none returned calls", 0, len(reply.calls))
     if expect.get("tools") == "required" and not reply.calls:
-        problems.append("required tool call missing")
+        add("tool_call_missing", "required tool call missing")
     if "max_calls" in expect and len(reply.calls) > expect["max_calls"]:
-        problems.append("too many tool calls")
+        add("tool_call_count_exceeded", "too many tool calls", expect["max_calls"], len(reply.calls))
     if "reasoning" in expect and bool(reply.reasoning) != expect["reasoning"]:
-        problems.append("reasoning presence differs from contract")
+        add("reasoning_presence_mismatch", "reasoning presence differs from contract", expect["reasoning"], bool(reply.reasoning))
     if expect.get("stream_shape") and not reply.chunks:
-        problems.append("stream response has no parsed chunks")
+        add("stream_empty", "stream response has no parsed chunks")
     if expect.get("no_marker_leak") and any(marker in reply.content for marker in MARKERS):
-        problems.append("structural marker leaked into content")
+        add("marker_leaked", "structural marker leaked into content")
     for value in expect.get("content_contains", []):
         if value not in reply.content:
-            problems.append(f"content missing {value!r}")
+            add("content_literal_missing", "content missing requested literal", value, reply.content)
     ids = [call.get("id") for call in reply.calls]
     if any(not call_id for call_id in ids) or len(set(ids)) != len(ids):
-        problems.append("tool call ids are empty or duplicated")
-    if reply.calls and reply.finish_reason != "tool_calls":
-        problems.append("calls require finish_reason=tool_calls")
-    if not reply.calls and reply.finish_reason == "tool_calls":
-        problems.append("finish_reason=tool_calls without calls")
-    for call in reply.calls:
+        add("tool_id_invalid", "tool call ids are empty or duplicated", "unique nonempty ids", ids)
+    if bool(reply.calls) != (reply.finish_reason == "tool_calls"):
+        add("tool_finish_mismatch", "calls and tool_calls finish reason disagree")
+    for index, call in enumerate(reply.calls):
         if not call.get("name"):
-            problems.append("empty tool name")
+            add("tool_name_empty", "empty tool name", actual=call.get("name"), path=["calls", index, "name"])
         if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
-            problems.append(f"undeclared/unexpected tool {call.get('name')!r}")
+            add("tool_name_undeclared", "undeclared/unexpected tool", expect["tool_names"], call.get("name"), ["calls", index, "name"])
     calls = reply.calls[:1] if expect.get("first_call_only") else reply.calls
-    for call in calls:
+    for index, call in enumerate(calls):
         if expect.get("arguments_nonempty") and not call.get("arguments"):
-            problems.append("tool-call arguments are empty")
+            add("arguments_empty", "tool-call arguments are empty")
         if expect.get("arguments_json") or "arguments_schema" in expect:
             try:
                 if not isinstance(call["arguments"], str) or not call["arguments"]:
                     raise ValueError("missing JSON arguments")
                 value = strict_json(call["arguments"])
                 if "arguments_schema" in expect:
-                    problems.extend("arguments schema: " + error.message for error in Draft202012Validator(expect["arguments_schema"]).iter_errors(value))
+                    for error in oracle_validator(expect["arguments_schema"]).iter_errors(value):
+                        add("arguments_schema_mismatch", error.message, error.validator_value, error.instance,
+                            ["calls", index, "arguments", *error.absolute_path])
             except (ValueError, TypeError):
-                problems.append("arguments are not a nonempty valid JSON string")
+                add("arguments_json_invalid", "arguments are not a nonempty valid JSON string", actual=call.get("arguments"))
         if "forbidden_arguments" in expect and call["arguments"] == expect["forbidden_arguments"]:
-            problems.append("arguments repeat forbidden history")
+            add("arguments_history_repeated", "arguments repeat forbidden history")
         if "id_min_suffix" in expect:
             match = re.fullmatch(r".+_(\d+)", call.get("id") or "")
             if not match or int(match.group(1)) < expect["id_min_suffix"]:
-                problems.append("tool id suffix did not continue history")
+                add("tool_id_history_mismatch", "tool id suffix did not continue history", expect["id_min_suffix"], call.get("id"))
     if expect.get("content_json") or "content_schema" in expect or expect.get("no_empty_key"):
         try:
             value = strict_json(reply.content)
             if expect.get("content_json") == "object" and not isinstance(value, dict):
-                problems.append("content is not a JSON object")
+                add("content_object_required", "content is not a JSON object", "object", value)
             if expect.get("no_empty_key") and isinstance(value, dict) and "" in value:
-                problems.append("empty-key regression")
+                add("content_empty_key", "empty-key regression")
             if "content_schema" in expect:
-                problems.extend("content schema: " + error.message for error in Draft202012Validator(expect["content_schema"]).iter_errors(value))
+                for error in oracle_validator(expect["content_schema"]).iter_errors(value):
+                    add("content_schema_mismatch", error.message, error.validator_value, error.instance, ["content", *error.absolute_path])
         except (ValueError, TypeError):
-            problems.append("content is not valid JSON")
+            add("content_json_invalid", "content is not valid JSON", actual=reply.content)
     if any(key in expect for key in ("usage", "usage_details", "max_completion_tokens", "prompt_tokens", "same_prompt_as", "minimum_prompt_delta")):
         usage = reply.usage or {}
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             if type(usage.get(key)) is not int or usage[key] < 0:
-                problems.append(f"usage.{key} missing or not a nonnegative integer")
+                add("usage_value_invalid", f"usage.{key} missing or not a nonnegative integer", "nonnegative integer", usage.get(key), ["usage", key])
         if all(type(usage.get(key)) is int for key in ("prompt_tokens", "completion_tokens", "total_tokens")) and usage["total_tokens"] != usage["prompt_tokens"] + usage["completion_tokens"]:
-            problems.append("usage total != prompt + completion")
+            add("usage_total_mismatch", "usage total != prompt + completion")
         if "max_completion_tokens" in expect and type(usage.get("completion_tokens")) is int and usage["completion_tokens"] > expect["max_completion_tokens"]:
-            problems.append("completion usage exceeds selected output cap")
+            add("completion_cap_exceeded", "completion usage exceeds selected output cap", expect["max_completion_tokens"], usage["completion_tokens"])
         if "prompt_tokens" in expect and usage.get("prompt_tokens") != expect["prompt_tokens"]:
-            problems.append(f"prompt_tokens={usage.get('prompt_tokens')}, expected={expect['prompt_tokens']}")
+            add("prompt_tokens_mismatch", "prompt token count differs", expect["prompt_tokens"], usage.get("prompt_tokens"))
         if expect.get("usage_details"):
             for group, key, total in (("prompt_tokens_details", "cached_tokens", "prompt_tokens"),
                                       ("completion_tokens_details", "reasoning_tokens", "completion_tokens")):
                 details = usage.get(group)
                 value = details.get(key) if isinstance(details, dict) else None
                 if type(value) is not int or value < 0 or (type(usage.get(total)) is int and value > usage[total]):
-                    problems.append(f"usage.{group}.{key} missing or out of bounds")
+                    add("usage_details_invalid", f"usage.{group}.{key} missing or out of bounds", actual=value, path=["usage", group, key])
         if "same_prompt_as" in expect:
             index = expect["same_prompt_as"]
             if index >= len(previous) or previous[index].status != 200 or type((previous[index].usage or {}).get("prompt_tokens")) is not int:
-                problems.append("prompt comparison unavailable: previous step lacks valid usage")
+                add("prompt_comparison_unavailable", "previous step lacks valid usage")
             elif (previous[index].usage or {})["prompt_tokens"] != usage.get("prompt_tokens"):
-                problems.append("equivalent requests have different prompt_tokens")
+                add("prompt_parity_mismatch", "equivalent requests have different prompt_tokens", previous[index].usage["prompt_tokens"], usage.get("prompt_tokens"))
         if "minimum_prompt_delta" in expect:
             before = (previous[-1].usage or {}).get("prompt_tokens") if previous else None
             after = usage.get("prompt_tokens")
             if type(before) is not int or type(after) is not int or after - before < expect["minimum_prompt_delta"]:
-                problems.append(f"prompt token delta below {expect['minimum_prompt_delta']}")
+                add("prompt_delta_mismatch", "prompt token delta below minimum", expect["minimum_prompt_delta"], None if type(before) is not int or type(after) is not int else after - before)
     return problems
 
 
@@ -427,7 +436,7 @@ def materialize_step(step: dict[str, Any], case: dict[str, Any], service: Servic
     return request
 
 
-def _outcome(reply: Reply, expect: dict[str, Any], problems: list[str]) -> tuple[str, str | None]:
+def _outcome(reply: Reply, expect: dict[str, Any], problems: list[dict[str, Any]]) -> tuple[str, str | None]:
     failure = service_failure(reply.status, reply.raw, reply.errors)
     if failure in {"service_invalid", "quota_exhausted"}:
         return "service_invalid", failure
@@ -440,6 +449,27 @@ def _outcome(reply: Reply, expect: dict[str, Any], problems: list[str]) -> tuple
     if reply.incomplete or (reply.finish_reason == "length" and not expect.get("allow_truncation") and expect.get("finish_reason") != "length"):
         return "inconclusive", None
     return ("failed" if problems else "passed"), None
+
+
+def prepare_steps(plan: dict[str, Any], service: ServiceAccess, root: Path) -> list[tuple]:
+    """Resolve requests and expectations once; execution consumes these snapshots."""
+    prepared = []
+    for case in plan["cases"]:
+        if case["missing_requirements"]:
+            continue
+        for repeat, group, index, mode, step in iter_case_steps(case, plan["repeat"]):
+            request = materialize_step(step, case, service, mode, root)
+            expect = copy.deepcopy(step["expect"])
+            if expect["status"] == 200:
+                tools = list(request.get("tools") or [])
+                for message in request["messages"]:
+                    tools.extend(message.get("tools") or [])
+                declared = [tool["function"]["name"] for tool in tools]
+                if set(expect.get("tool_names", [])) - set(declared):
+                    raise ConfigError("case_invalid", f"{case['id']}: oracle names an undeclared tool")
+                expect.setdefault("tool_names", declared)
+            prepared.append((case, repeat, group, index, mode, step, request, expect))
+    return prepared
 
 
 def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
@@ -464,21 +494,13 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
     token_parameter()  # Configuration errors must fail before endpoint traffic.
     if expected_count and not service.credential():
         raise ConfigError("credential_missing", f"set {service.api_key_env}")
-    # Resolve all fixtures before sending the first request, freezing the exact
-    # request bytes represented by this run (not a later-mutated fixture).
-    prepared = []
-    for case, repeat, group, index, mode, step in units:
-        request = materialize_step(step, case, service, mode, root)
-        expect = copy.deepcopy(step["expect"])
-        if expect["status"] == 200:
-            tools = list(request.get("tools") or [])
-            for message in request["messages"]:
-                tools.extend(message.get("tools") or [])
-            declared = [tool["function"]["name"] for tool in tools]
-            if set(expect.get("tool_names", [])) - set(declared):
-                raise ConfigError("case_invalid", f"{case['id']}: oracle names an undeclared tool")
-            expect.setdefault("tool_names", declared)
-        prepared.append((case, repeat, group, index, mode, step, request, expect))
+    if plan.get("kind") == "endpoint_plan":
+        from .execution_plan import verify_plan
+        prepared = verify_plan(plan, service, root=root)
+        if timeout != plan["execution"]["timeout_seconds"] or max_requests > plan["execution"]["max_requests"]:
+            raise ConfigError("plan_override_invalid", "execution limits cannot expand or differ from the frozen plan")
+    else:
+        prepared = prepare_steps(plan, service, root)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     directory = results_root(root) / plan["model"] / f"{stamp}-{os.urandom(4).hex()}"
     directory.mkdir(parents=True, exist_ok=False)
@@ -490,19 +512,19 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
     save("plan.json", plan)
     save("service-access.json", service.public_dict())
     results = [{"id": case["id"], "capability": case["capability"], "status": "unsupported",
-                "problems": case["missing_requirements"], "knowledge": case["knowledge"],
+                "problems": [issue("requirement_missing", "case not applicable", actual=value) for value in case["missing_requirements"]], "knowledge": case["knowledge"],
                 "likely_components": case["likely_components"], "source": case["source"]}
                for case in plan["cases"] if case["missing_requirements"]]
     client, actual_requests, stop_reason = CapabilityClient(service, timeout=timeout), 0, None
     histories: dict[tuple[str, int, int], list[Reply]] = {}
     for case, repeat, group, index, mode, step, request, expect in prepared:
         result = {"id": case["id"], "capability": case["capability"], "repeat": repeat,
-                  "mode": mode, "step": index, "problems": [], "likely_components": case["likely_components"],
+                  "group": group, "mode": mode, "step": index, "problems": [], "likely_components": case["likely_components"],
                   "knowledge": case["knowledge"], "source": case["source"]}
         evidence_name = f"{case['id']}-{repeat}-{group}-{mode}-{index}.json"
         if stop_reason or actual_requests >= max_requests:
             stop_reason = stop_reason or "request_budget_exceeded"
-            result.update(status="not_run", problems=[f"stopped after {stop_reason}"])
+            result.update(status="not_run", problems=[issue("execution_stopped", "not run after a previous failure", actual=stop_reason)])
             results.append(result)
             continue
         reply = None
@@ -521,22 +543,27 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
         except Exception as exc:
             stop_reason = "runner_error"
             result.update(status="execution_invalid", failure_class="runner_error",
-                          problems=[f"runner error: {type(exc).__name__}: {exc}"])
+                          problems=[issue("runner_error", f"runner error: {type(exc).__name__}: {exc}")])
         result["evidence"] = evidence_name
-        save(evidence_name, {"request": request, "response": asdict(reply) if reply is not None else None,
-                             "expect": expect, "result": result, "request_sha256": canonical_hash(request)})
+        evidence = redact({"schema_version": 1, "kind": "endpoint_evidence", "request": request,
+                           "response": asdict(reply) if reply is not None else None, "expect": expect,
+                           "result": result, "request_sha256": canonical_hash(request)}, credential)
+        validate_contract(evidence, "evidence.schema.json")
+        save(evidence_name, evidence)
         results.append(result)
     statuses = {result["status"] for result in results}
     status = next((value for value in ("service_invalid", "execution_invalid", "failed") if value in statuses), None)
     status = status or ("incomplete" if statuses & {"inconclusive", "unsupported", "not_run"} else "observed" if "observed" in statuses else "passed")
-    report = redact({"schema_version": 1, "status": status, "model": plan["model"], "run_dir": str(directory),
+    report = redact({"schema_version": 1, "kind": "endpoint_report", "status": status, "model": plan["model"], "run_dir": str(directory),
+                     "plan_sha256": plan.get("plan_sha256"),
                      "stop_reason": stop_reason, "planned_requests": expected_count, "actual_requests": actual_requests,
                      "results": results, "disclaimer": "Capability regression evidence; not a model-quality benchmark or vendor acceptance."}, credential)
+    validate_contract(report, "report.schema.json")
     save("report.json", report)
     lines = ["# Kimi capability regression", "", f"Status: **{status}**", f"Requests: {actual_requests}/{expected_count}", "", report["disclaimer"], ""]
     for result in report["results"]:
         lines.append(f"- {result['id']} ({result.get('mode', 'not executed')}): **{result['status']}**")
-        lines.extend(f"  - {problem}" for problem in result["problems"])
+        lines.extend(f"  - {problem['code']}: {problem['message']}" for problem in result["problems"])
         if result.get("evidence"):
             lines.append(f"  - [evidence]({result['evidence']})")
         lines.append("  - Components: " + ", ".join(result["likely_components"]))

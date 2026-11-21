@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "endpoint_evidence"
+    },
+    "request": {
+      "type": "object"
+    },
+    "response": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "raw": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            },
+            "calls": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "finish_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "usage": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "chunks": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "done": {
+              "type": "boolean"
+            },
+            "incomplete": {
+              "type": "boolean"
+            },
+            "errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "raw",
+            "content",
+            "reasoning",
+            "calls",
+            "finish_reason",
+            "usage",
+            "headers",
+            "chunks",
+            "done",
+            "incomplete",
+            "errors"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expect": {
+      "type": "object"
+    },
+    "result": {
+      "$ref": "case-result.schema.json"
+    },
+    "request_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "request",
+    "response",
+    "expect",
+    "result",
+    "request_sha256"
+  ]
+}

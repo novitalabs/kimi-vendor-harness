@@ -31,8 +31,8 @@ def test_parser_validator_rejects_duplicate_id(tmp_path: Path) -> None:
         capture_output=True,
         check=False,
     )
-    assert process.returncode == 1
-    assert "duplicate id" in process.stderr
+    assert process.returncode == 2
+    assert json.loads(process.stdout)["problems"][0]["code"] == "parser_vectors_invalid"
 
 
 def run_adapter(tmp_path, body, *options):
@@ -48,17 +48,18 @@ def test_parser_adapter_timeout_including_partial_line(tmp_path):
     process = run_adapter(tmp_path, "import sys,time\nsys.stdout.write('{'); sys.stdout.flush(); time.sleep(60)\n",
                           "--timeout", "0.15")
     assert process.returncode == 2
-    assert "timed out" in process.stderr
+    assert json.loads(process.stdout)["problems"][0]["code"] == "adapter_timeout"
 
 
 def test_parser_adapter_bad_json_wrong_count_and_nonzero_exit(tmp_path):
     process = run_adapter(tmp_path, "import sys\nfor line in sys.stdin: print('[]', flush=True)\nsys.exit(3)\n")
-    assert process.returncode == 1
-    assert "status 3" in process.stderr
-    assert "invalid adapter JSON/result" in process.stderr
+    assert process.returncode == 2
+    output = json.loads(process.stdout)
+    assert output["problems"][0]["code"] == "adapter_exit_nonzero"
+    assert output["results"][0]["problems"][0]["code"] == "adapter_result_invalid"
     process = run_adapter(tmp_path, "import sys\nsys.stdin.read()\n")
     assert process.returncode == 1
-    assert "result count=0" in process.stderr
+    assert json.loads(process.stdout)["problems"][0]["code"] == "adapter_result_count_mismatch"
 
 
 def test_parser_adapter_protocol_passes_and_extra_lines_fail(tmp_path):
@@ -70,10 +71,11 @@ def test_parser_adapter_protocol_passes_and_extra_lines_fail(tmp_path):
     )
     process = run_adapter(tmp_path, body)
     assert process.returncode == 0, process.stderr
-    assert "7 vectors passed" in process.stdout
+    assert json.loads(process.stdout)["vector_count"] == 7
+    assert json.loads(process.stdout)["trial_count"] == 21
     process = run_adapter(tmp_path, body + "print('{}')\n")
     assert process.returncode == 1
-    assert "result count" in process.stderr
+    assert json.loads(process.stdout)["problems"][0]["code"] == "adapter_result_count_mismatch"
 
 
 def test_parser_adapter_noisy_stderr_cannot_deadlock(tmp_path):
@@ -116,4 +118,4 @@ def test_parser_adapter_rejects_invalid_timeout_and_binary_results(tmp_path):
     assert process.returncode == 2
     process = run_adapter(tmp_path, "import sys\nsys.stdin.read();sys.stdout.buffer.write(bytes([255]))\n")
     assert process.returncode == 1
-    assert "not UTF-8" in process.stderr
+    assert json.loads(process.stdout)["problems"][0]["code"] == "adapter_encoding_invalid"

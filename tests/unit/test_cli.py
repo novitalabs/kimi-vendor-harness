@@ -41,7 +41,7 @@ def test_plan_defaults_to_smoke_all_is_explicit_and_profile_is_validated(capsys)
     assert any("smoke" not in case["tags"] for case in cases)
     assert all(case["scope"] == "endpoint" for case in cases)
     assert main(["plan", "--model", "missing-profile"]) == 2
-    assert "cannot read" in capsys.readouterr().err
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "configuration_invalid"
 
 
 @pytest.mark.parametrize("format", ["summary", "json"])
@@ -70,11 +70,11 @@ def access_file(tmp_path, **overrides):
 def test_doctor_validates_access_file_and_key_without_probe(tmp_path, monkeypatch, capsys):
     missing = tmp_path / "missing.json"
     assert main(["doctor", "--service-access", str(missing)]) == 2
-    assert "service_access_invalid" in capsys.readouterr().err
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "service_access_invalid"
     path = access_file(tmp_path)
     monkeypatch.delenv("CLI_TEST_KEY", raising=False)
     assert main(["doctor", "--service-access", str(path)]) == 2
-    assert "credential_missing" in capsys.readouterr().err
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "credential_missing"
     monkeypatch.setenv("CLI_TEST_KEY", "synthetic-cli-key")
     assert main(["doctor", "--service-access", str(path)]) == 0
     output = json.loads(capsys.readouterr().out)
@@ -87,14 +87,14 @@ def test_doctor_blocks_access_model_mismatch_and_unsupported_selection(tmp_path,
     path = access_file(tmp_path, model_family="kimi-k3-flash")
     monkeypatch.setenv("CLI_TEST_KEY", "test")
     assert main(["doctor", "--service-access", str(path)]) == 2
-    assert "model_mismatch" in capsys.readouterr().err
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "model_mismatch"
     assert main(["doctor", "--model", "kimi-k3-flash", "--select", "reasoning.precedence"]) == 2
-    assert "selected_cases_unsupported" in json.loads(capsys.readouterr().out)["reasons"]
+    assert "selected_cases_unsupported" in {p["code"] for p in json.loads(capsys.readouterr().out)["problems"]}
 
 
 def test_run_requires_ack_before_access_or_traffic(capsys):
     assert main(["run", "--service-access", "/missing.json"]) == 2
-    assert "execute_ack_required" in capsys.readouterr().err
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "execute_ack_required"
 
 
 def test_smoke_plan_is_endpoint_only_and_budget_is_explicit(capsys):
@@ -105,7 +105,7 @@ def test_smoke_plan_is_endpoint_only_and_budget_is_explicit(capsys):
     assert plan["max_output_tokens_budget"] > 0
     assert plan["retries"] == 0
     assert main(["doctor", "--max-requests", "0"]) == 2
-    assert "request_budget_exceeds_ceiling" in json.loads(capsys.readouterr().out)["reasons"]
+    assert "request_budget_exceeds_ceiling" in {p["code"] for p in json.loads(capsys.readouterr().out)["problems"]}
 
 
 @pytest.mark.parametrize("args", [
@@ -114,10 +114,10 @@ def test_smoke_plan_is_endpoint_only_and_budget_is_explicit(capsys):
     ["parser", "run", "--adapter", "no-such-adapter", "--adapter-timeout", "1"],
 ])
 def test_old_commands_and_options_are_rejected_without_traffic(args, capsys):
-    with pytest.raises(SystemExit) as exc:
-        main(args)
-    assert exc.value.code == 2
-    assert "error:" in capsys.readouterr().err
+    assert main(args) == 2
+    output = capsys.readouterr()
+    assert not output.err
+    assert json.loads(output.out)["error"]["code"] == "arguments_invalid"
 
 
 def test_single_console_entrypoint_and_no_legacy_parser_scripts():
@@ -133,4 +133,7 @@ def test_parser_validate_does_not_load_endpoint_catalog(monkeypatch, capsys):
         pytest.fail("parser command loaded endpoint plan")
     monkeypatch.setattr(cli, "_plan", forbidden)
     assert main(["parser", "validate"]) == 0
-    assert "7 parser conformance vectors valid" in capsys.readouterr().out
+    output = json.loads(capsys.readouterr().out)
+    assert output["vector_count"] == 7
+    assert output["trial_count"] == 21
+    assert output["kind"] == "parser_validation"

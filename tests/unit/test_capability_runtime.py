@@ -95,7 +95,9 @@ def test_malformed_success_shape_becomes_a_case_error(body):
 
 def test_assertion_distinguishes_invalid_request_from_server_failure():
     assert assert_reply(Reply(400, '{"error":{"message":"invalid schema"}}'), {"status": 400, "error_object": True}, []) == []
-    assert assert_reply(Reply(500, "crashed"), {"status": 400, "error_object": True}, []) == ["status=500, expected=400"]
+    problems = assert_reply(Reply(500, "crashed"), {"status": 400, "error_object": True}, [])
+    assert problems[0]["code"] == "http_status_mismatch"
+    assert (problems[0]["expected"], problems[0]["actual"]) == (400, 500)
 
 
 @pytest.mark.parametrize("status,raw,errors,expected", [
@@ -176,7 +178,8 @@ def test_all_report_representations_redact_echoed_secret(service, monkeypatch, t
     assert key not in json.dumps(report)
     for file in Path(report["run_dir"]).iterdir():
         assert key not in file.read_text(), file
-    assert "[REDACTED]" in Path(report["run_dir"], "report.md").read_text()
+    assert report["results"][0]["problems"][0]["actual"] == "[REDACTED]"
+    assert "tool_name_undeclared" in Path(report["run_dir"], "report.md").read_text()
 
 
 def test_repeat_usage_comparison_is_local_to_each_repeat(service, monkeypatch, tmp_path):
@@ -214,7 +217,7 @@ def test_output_cap_allows_intentional_truncation_but_checks_usage(service, monk
     second = run_plan(plan(case), service, max_requests=1, root=tmp_path)
     assert first["status"] == "passed"
     assert second["status"] == "failed"
-    assert "completion usage exceeds selected output cap" in second["results"][0]["problems"]
+    assert "completion_cap_exceeded" in {p["code"] for p in second["results"][0]["problems"]}
 
 
 def test_token_wire_parameter_is_exclusive_and_invalid_value_is_local(tmp_path, service, monkeypatch):

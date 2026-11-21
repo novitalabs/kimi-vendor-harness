@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "enum": [
+        "parser_validation",
+        "parser_report"
+      ]
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "failed",
+        "execution_invalid",
+        "blocked"
+      ]
+    },
+    "vectors": {
+      "type": "string"
+    },
+    "vectors_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "vector_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "trial_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "chunk_size": {
+            "anyOf": [
+              {
+                "const": "all"
+              },
+              {
+                "type": "integer",
+                "minimum": 1
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "not_run"
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "$ref": "problem.schema.json"
+            }
+          },
+          "expected": {
+            "type": "object"
+          },
+          "actual": {}
+        },
+        "required": [
+          "id",
+          "chunk_size",
+          "status",
+          "problems",
+          "expected",
+          "actual"
+        ]
+      }
+    },
+    "stderr": {
+      "type": "string"
+    },
+    "endpoint_requests": {
+      "const": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "vectors",
+    "vectors_sha256",
+    "vector_count",
+    "trial_count",
+    "problems",
+    "results",
+    "stderr",
+    "endpoint_requests"
+  ]
+}

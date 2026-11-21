@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "capability": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "observed",
+        "failed",
+        "inconclusive",
+        "service_invalid",
+        "execution_invalid",
+        "unsupported",
+        "not_run"
+      ]
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    },
+    "knowledge": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "likely_components": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source": {
+      "type": "object"
+    },
+    "repeat": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "group": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "mode": {
+      "enum": [
+        "stream",
+        "nonstream"
+      ]
+    },
+    "step": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failure_class": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "capability",
+    "status",
+    "problems",
+    "knowledge",
+    "likely_components",
+    "source"
+  ]
+}

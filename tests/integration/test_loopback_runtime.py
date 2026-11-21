@@ -122,14 +122,12 @@ def test_healthy_smoke_through_cli_counts_exact_http_requests(endpoint, tmp_path
             capsys.readouterr()
         assert not requests
         for old in (["list"], ["capabilities", "plan"], ["capabilities", "run", "--execute"]):
-            with pytest.raises(SystemExit) as exc:
-                main(old)
-            assert exc.value.code == 2
-            capsys.readouterr()
+            assert main(old) == 2
+            assert json.loads(capsys.readouterr().out)["error"]["code"] == "arguments_invalid"
         assert not requests
         args = ["run", "--service-access", str(path), "--select", "smoke", "--execute"]
         assert main(args + ["--max-requests", "12"]) == 2
-        assert "request_budget_exceeded" in capsys.readouterr().err
+        assert json.loads(capsys.readouterr().out)["error"]["code"] == "request_budget_exceeded"
         assert not requests
         assert main(args + ["--max-requests", "13"]) == 0
         report = json.loads(capsys.readouterr().out)
@@ -170,7 +168,7 @@ def test_http_malformed_200_keeps_raw_evidence(endpoint):
         assert report["status"] == "failed"
         assert len(requests) == 1
         assert json.loads(evidence(report)["response"]["raw"]) == body
-        assert any("content must be a string" in item for item in report["results"][0]["problems"])
+        assert any(item["code"] == "response_invalid" for item in report["results"][0]["problems"])
 
 
 @pytest.mark.parametrize("fault", ["healthy", "missing_id", "missing_name", "id_rewrite", "after_finish", "duplicate_usage", "missing_done", "after_done"])
@@ -229,7 +227,7 @@ def test_http_tools_combination_rejects_wrong_json(endpoint, content):
         report = runtime.run_plan(catalog_plan("structured_output.tools_combined"), access, max_requests=2)
         assert report["status"] != "passed"
         assert report["results"][0]["status"] == "failed"
-        assert any("content schema" in p for p in report["results"][0]["problems"])
+        assert any(p["code"] == "content_schema_mismatch" for p in report["results"][0]["problems"])
 
 
 def test_http_secret_echo_redacts_stdout_markdown_json_and_raw(endpoint, tmp_path, capsys):
@@ -244,7 +242,8 @@ def test_http_secret_echo_redacts_stdout_markdown_json_and_raw(endpoint, tmp_pat
         report = json.loads(output)
         for file in Path(report["run_dir"]).iterdir():
             assert key not in file.read_text(), file
-        assert "[REDACTED]" in Path(report["run_dir"], "report.md").read_text()
+        assert any(p["actual"] == "[REDACTED]" for p in report["results"][0]["problems"])
+        assert "tool_name_undeclared" in Path(report["run_dir"], "report.md").read_text()
 
 
 def test_http_repeat_history_and_mode_override_are_isolated(endpoint):
@@ -265,6 +264,95 @@ def test_http_repeat_history_and_mode_override_are_isolated(endpoint):
         assert len(requests) == 4
         assert [request["stream"] for request in requests] == [False, True, False, True]
         assert len({row["evidence"] for row in report["results"]}) == 4
+
+
+def test_frozen_agent_flow_reports_structured_failure_and_evidence(endpoint, tmp_path, capsys):
+    from novita_self_test.contracts import validate_contract
+    def respond(handler, request, n):
+        if request["stream"]:
+            chunks = frames()
+            chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] = "unexpected"
+            send(handler, raw=sse(chunks), stream=True)
+        else:
+            send(handler, body=completion(calls=[call(name="unexpected")]))
+    with endpoint(respond) as (access, requests):
+        path, plan_path = tmp_path / "access.json", tmp_path / "plan.json"
+        path.write_text(json.dumps(access.public_dict()))
+        assert main(["plan", "--select", "tool_call.choice.required", "--service-access", str(path),
+                     "--max-requests", "2", "--out", str(plan_path)]) == 0
+        plan = json.loads(capsys.readouterr().out)
+        validate_contract(plan, "plan.schema.json")
+        assert plan["executable"] and plan["request_budget"] == 2
+        assert main(["doctor", "--plan", str(plan_path), "--service-access", str(path)]) == 0
+        validate_contract(json.loads(capsys.readouterr().out), "doctor.schema.json")
+        assert not requests
+        assert main(["run", "--plan", str(plan_path), "--service-access", str(path), "--execute"]) == 1
+        report = json.loads(capsys.readouterr().out)
+        validate_contract(report, "report.schema.json")
+        assert len(requests) == report["actual_requests"] == 2
+        assert report["plan_sha256"] == plan["plan_sha256"]
+        for row in report["results"]:
+            assert row["problems"][0]["code"] == "tool_name_undeclared"
+            assert row["knowledge"] and row["likely_components"]
+            raw = json.loads(Path(report["run_dir"], row["evidence"]).read_text())
+            validate_contract(raw, "evidence.schema.json")
+            assert raw["result"]["problems"][0]["actual"] == "unexpected"
+
+
+@pytest.mark.parametrize("override", [
+    ["--model", "kimi-k3"], ["--select", "all"], ["--repeat", "2"],
+    ["--timeout", "120"], ["--max-requests", "3"],
+])
+def test_frozen_plan_cli_rejects_expansion_or_reselection_with_zero_requests(endpoint, tmp_path, capsys, override):
+    with endpoint(lambda h, req, n: send(h, body=completion())) as (access, requests):
+        access_path, plan_path = tmp_path / "access.json", tmp_path / "plan.json"
+        access_path.write_text(json.dumps(access.public_dict()))
+        assert main(["plan", "--select", "tool_call.choice.required", "--service-access", str(access_path),
+                     "--max-requests", "2", "--out", str(plan_path)]) == 0
+        capsys.readouterr()
+        assert main(["run", "--plan", str(plan_path), "--service-access", str(access_path), "--execute", *override]) == 2
+        result = json.loads(capsys.readouterr().out)
+        assert result["error"]["code"] == "plan_override_invalid"
+        assert result["endpoint_requests"] == 0
+        assert not requests
+
+
+def test_frozen_plan_tamper_and_target_change_have_zero_traffic(endpoint, tmp_path, capsys):
+    with endpoint(lambda h, req, n: send(h, body=completion())) as (access, requests):
+        access_path, plan_path = tmp_path / "access.json", tmp_path / "plan.json"
+        access_path.write_text(json.dumps(access.public_dict()))
+        assert main(["plan", "--service-access", str(access_path), "--out", str(plan_path)]) == 0
+        plan = json.loads(capsys.readouterr().out)
+        plan["request_budget"] = 0
+        plan_path.write_text(json.dumps(plan))
+        assert main(["run", "--plan", str(plan_path), "--service-access", str(access_path), "--execute"]) == 2
+        assert json.loads(capsys.readouterr().out)["error"]["code"] == "plan_integrity_invalid"
+        plan["request_budget"] = 13
+        plan_path.write_text(json.dumps(plan))
+        changed = access.public_dict()
+        changed["served_model"] = "wrong-model"
+        access_path.write_text(json.dumps(changed))
+        assert main(["run", "--plan", str(plan_path), "--service-access", str(access_path), "--execute"]) == 2
+        assert json.loads(capsys.readouterr().out)["error"]["code"] == "plan_target_mismatch"
+        assert not requests
+
+
+def test_frozen_run_lowered_budget_and_missing_opt_in_ack_send_nothing(endpoint, tmp_path, capsys):
+    with endpoint(lambda h, req, n: send(h, body=completion())) as (access, requests):
+        access_path, plan_path = tmp_path / "access.json", tmp_path / "plan.json"
+        access_path.write_text(json.dumps(access.public_dict()))
+        for selector, ceiling, extra, expected in [
+            ("tool_call.choice.required", 2, ["--max-requests", "1"], "request_budget_exceeded"),
+            ("conversation_state.arguments_recovery_a", 1, [], "opt_in_ack_required"),
+        ]:
+            assert main(["plan", "--service-access", str(access_path), "--select", selector,
+                         "--max-requests", str(ceiling), "--out", str(plan_path)]) == 0
+            capsys.readouterr()
+            assert main(["run", "--plan", str(plan_path), "--service-access", str(access_path), "--execute", *extra]) == 2
+            error = json.loads(capsys.readouterr().out)
+            assert error["error"]["code"] == expected
+            assert error["endpoint_requests"] == 0
+        assert not requests
 
 
 def test_opt_in_requires_ack_before_any_http(endpoint):

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "doctor"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "blocked"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "case_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "planned_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unsupported": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "missing_requirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "missing_requirements"
+        ]
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    },
+    "endpoint_probe": {
+      "const": false
+    },
+    "access_checked": {
+      "type": "boolean"
+    },
+    "plan_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "model",
+    "case_count",
+    "planned_requests",
+    "max_requests",
+    "unsupported",
+    "problems",
+    "endpoint_probe",
+    "access_checked",
+    "plan_sha256"
+  ]
+}
