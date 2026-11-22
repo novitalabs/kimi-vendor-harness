@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -52,6 +53,34 @@ def test_contract_validation_rejects_missing_and_unknown_fields():
     del value["code"]
     with pytest.raises(ConfigError):
         validate_contract(value, "problem.schema.json")
+
+
+@pytest.mark.parametrize("field,value", [("extra", True), ("role", "unknown"), ("steps", [{"request": {}, "expect": {"status": 99}}])])
+def test_catalog_and_frozen_plan_share_strict_case_contract(field, value):
+    from novita_self_test.case_catalog import load_cases
+    from novita_self_test.execution_plan import create_plan
+    raw = json.loads((ROOT / "capabilities/tool_call/choice/cases.jsonl").read_text().split("\n")[0])
+    validate_contract(raw, "capability-case.schema.json")
+    changed = copy.deepcopy(raw)
+    changed[field] = value
+    with pytest.raises(ConfigError):
+        validate_contract(changed, "capability-case.schema.json")
+    plan = create_plan(model="kimi-k3", selectors=[raw["id"]])
+    plan["cases"][0][field] = value
+    with pytest.raises(ConfigError):
+        validate_contract(plan, "plan.schema.json")
+    # Planner-only metadata is not accepted in source case files.
+    case = load_cases()[0]
+    with pytest.raises(ConfigError):
+        validate_contract(case, "capability-case.schema.json")
+
+
+@pytest.mark.parametrize("field", ["arguments_json", "arguments_nonempty"])
+def test_removed_argument_flags_cannot_suggest_opt_out_of_shared_checks(field):
+    case = json.loads((ROOT / "capabilities/tool_call/choice/cases.jsonl").read_text().split("\n")[0])
+    case["steps"][0]["expect"][field] = False
+    with pytest.raises(ConfigError):
+        validate_contract(case, "capability-case.schema.json")
 
 
 def test_schema_oracles_cannot_fetch_external_resources(monkeypatch):

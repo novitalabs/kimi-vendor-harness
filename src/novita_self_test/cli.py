@@ -77,10 +77,6 @@ def parser() -> argparse.ArgumentParser:
     return root
 
 
-def _plan(model: str, selectors: list[str] | None, repeat: int = 1, **kwargs) -> dict:
-    return create_plan(model=model, selectors=selectors, repeat=repeat, **kwargs)
-
-
 def _saved_plan(args, service: ServiceAccess) -> dict:
     if args.model is not None or args.select is not None or getattr(args, "repeat", None) is not None or getattr(args, "timeout", None) is not None:
         raise ConfigError("plan_override_invalid", "--plan cannot be combined with model/select/repeat/timeout overrides")
@@ -134,7 +130,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if not set(args.select) <= known_ids:
                     raise ConfigError("retest_case_unknown", "report references case ids absent from the current catalog; review before replanning")
             service = ServiceAccess.load(args.service_access) if args.service_access else None
-            plan = _plan(args.model, args.select, args.repeat, service=service, max_requests=args.max_requests, timeout=args.timeout)
+            plan = create_plan(model=args.model, selectors=args.select, repeat=args.repeat,
+                               service=service, max_requests=args.max_requests, timeout=args.timeout)
             text = _summary(plan) if args.format == "summary" else json_text(plan)
             if args.out:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -149,9 +146,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.plan:
                 plan = _saved_plan(args, access)
             else:
-                plan = _plan(args.model or "kimi-k3", args.select, args.repeat if args.repeat is not None else 1,
-                             service=access, max_requests=args.max_requests if args.max_requests is not None else 32,
-                             timeout=args.timeout if args.timeout is not None else 120)
+                plan = create_plan(model=args.model or "kimi-k3", selectors=args.select,
+                                   repeat=args.repeat if args.repeat is not None else 1,
+                                   service=access, max_requests=args.max_requests if args.max_requests is not None else 32,
+                                   timeout=args.timeout if args.timeout is not None else 120)
             ceiling = args.max_requests if args.max_requests is not None else plan["execution"]["max_requests"]
             execution_started = True
             output = run_plan(plan, access, max_requests=ceiling, timeout=plan["execution"]["timeout_seconds"], allow_opt_in=args.allow_opt_in)
@@ -166,8 +164,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 plan = _saved_plan(args, access)
             else:
                 access = ServiceAccess.load(args.service_access) if args.service_access else None
-                plan = _plan(args.model or "kimi-k3", args.select, service=access,
-                             max_requests=args.max_requests if args.max_requests is not None else 32)
+                plan = create_plan(model=args.model or "kimi-k3", selectors=args.select, service=access,
+                                   max_requests=args.max_requests if args.max_requests is not None else 32)
                 if access:
                     secret = access.credential()
             ceiling = args.max_requests if args.max_requests is not None else plan["execution"]["max_requests"]

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import copy
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from novita_self_test.case_catalog import load_cases, load_profile, build_plan, request_features, select_cases
+from novita_self_test.case_catalog import load_cases, load_profile, request_features, select_cases
 from novita_self_test.config import ConfigError, ServiceAccess
 from novita_self_test.execution_plan import create_plan, verify_plan
 from novita_self_test.target_contract import applicability, gate_summary

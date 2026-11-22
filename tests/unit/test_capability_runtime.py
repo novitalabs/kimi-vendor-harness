@@ -240,8 +240,13 @@ def test_budget_mismatch_and_invalid_timeout_send_nothing(service, monkeypatch, 
     bad_plan["request_budget"] = 1
     with pytest.raises(ConfigError, match="differs from executable"):
         run_plan(bad_plan, service, max_requests=1, root=tmp_path)
+    original_steps = runtime.iter_case_steps
+    def bounded_steps(case, repeat):
+        assert repeat == 1, "budget preflight must not expand repeat waves"
+        return original_steps(case, repeat)
+    monkeypatch.setattr(runtime, "iter_case_steps", bounded_steps)
     with pytest.raises(ConfigError, match="ceiling"):
-        run_plan(plan(make_case(), repeat=2), service, max_requests=1, root=tmp_path)
+        run_plan(plan(make_case(), repeat=10**8), service, max_requests=1, root=tmp_path)
     with pytest.raises(ConfigError, match="finite and positive"):
         run_plan(plan(make_case()), service, max_requests=1, timeout=float("nan"), root=tmp_path)
     assert not (tmp_path / "results").exists()
@@ -272,7 +277,7 @@ def test_sse_only_splits_protocol_newlines_not_unicode(text, separator):
 @pytest.mark.parametrize("arguments", ["null", "[]", "true", "7", '"string"'])
 def test_generated_tool_arguments_require_objects(arguments):
     reply = parse_reply(200, json.dumps(completion(calls=[tool_call(arguments=arguments)], finish="tool_calls")), stream=False)
-    assert "arguments_object_required" in {p["code"] for p in assert_reply(reply, {"status": 200, "arguments_json": True}, [])}
+    assert "arguments_object_required" in {p["code"] for p in assert_reply(reply, {"status": 200}, [])}
 
 
 def test_illegal_finish_envelope_and_truncation_preserve_known_protocol_failure():

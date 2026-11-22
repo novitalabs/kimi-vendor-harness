@@ -1,25 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object", "additionalProperties": false,
-  "required": ["id", "title", "capability", "tags", "source", "knowledge", "likely_components", "determinism", "role", "stage", "modes", "max_output_tokens", "steps"],
-  "properties": {
-    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$"},
-    "title": {"type": "string", "minLength": 1},
-    "capability": {"type": "string", "pattern": "^[a-z_]+(?:/[a-z_]+)*$"},
-    "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "source": {"type": "object", "additionalProperties": false, "required": ["id", "path", "adaptation"], "properties": {"id": {"type": "string"}, "path": {"type": "string"}, "test": {"type": "string"}, "adaptation": {"type": "string", "minLength": 1}}},
-    "knowledge": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
-    "likely_components": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "scope": {"const": "endpoint"},
-    "determinism": {"enum": ["contract", "behavioral", "observation", "oracle"]},
-    "role": {"enum": ["gate", "diagnostic", "observation", "platform"]},
-    "stage": {"enum": ["protocol", "tooling", "conversation", "robustness", "regression"]},
-    "modes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["stream", "nonstream"]}},
-    "max_output_tokens": {"type": "integer", "minimum": 1, "maximum": 32768},
-    "requires": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
-    "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
-  },
+  "$id": "capability-case.schema.json",
+  "$ref": "#/$defs/case",
+  "unevaluatedProperties": false,
   "$defs": {
+    "case": {
+      "type": "object",
+      "required": ["id", "title", "capability", "tags", "source", "knowledge", "likely_components", "determinism", "role", "stage", "modes", "max_output_tokens", "steps"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$"},
+        "title": {"type": "string", "minLength": 1},
+        "capability": {"type": "string", "pattern": "^[a-z_]+(?:/[a-z_]+)*$"},
+        "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "source": {"type": "object", "additionalProperties": false, "required": ["id", "path", "adaptation"], "properties": {"id": {"type": "string"}, "path": {"type": "string"}, "test": {"type": "string"}, "adaptation": {"type": "string", "minLength": 1}}},
+        "knowledge": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "likely_components": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "scope": {"const": "endpoint"},
+        "determinism": {"enum": ["contract", "behavioral", "observation", "oracle"]},
+        "role": {"enum": ["gate", "diagnostic", "observation", "platform"]},
+        "stage": {"enum": ["protocol", "tooling", "conversation", "robustness", "regression"]},
+        "modes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["stream", "nonstream"]}},
+        "max_output_tokens": {"type": "integer", "minimum": 1, "maximum": 32768},
+        "requires": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
+      }
+    },
     "step": {
       "type": "object", "additionalProperties": false, "required": ["expect"],
       "oneOf": [{"required": ["request"], "not": {"required": ["request_fixture"]}}, {"required": ["request_fixture"], "not": {"required": ["request"]}}],
@@ -44,8 +49,7 @@
           "properties": {
             "status": {"type": "integer", "minimum": 100, "maximum": 599},
             "error_object": {"type": "boolean"}, "public_turn": {"type": "boolean"},
-            "tools": {"enum": ["required", "none", "allowed"]},
-            "arguments_json": {"type": "boolean"}, "first_call_only": {"type": "boolean"}, "arguments_nonempty": {"type": "boolean"},
+            "tools": {"enum": ["required", "none", "allowed"]}, "first_call_only": {"type": "boolean"},
             "tool_names": {"type": "array", "items": {"type": "string"}},
             "arguments_schema": {"type": "object"}, "content_json": {"enum": ["object", "any"]},
             "content_schema": {"type": "object"}, "no_empty_key": {"type": "boolean"},

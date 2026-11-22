@@ -1,10 +1,9 @@
 # Bring up Kimi on a new inference framework
 
-This guide is a development workflow, not vendor acceptance or a quality score.
-The goal is to implement a **verified target contract**, prove each boundary at
-an appropriate layer, and retain a repair/regression trail. Do not aim to turn
-all catalog records green: observations and non-applicable platform policies
-are not mandatory capability passes.
+Implement a **verified target contract**, verify each boundary at the right
+layer, and retain a repair/regression trail. This is not vendor acceptance or
+a quality score. Use the [README](../README.md) for installation and the
+[agent protocol](agent-use.md) for authorization, freeze/execute and stop rules.
 
 ## 1. Establish the model contract before running endpoint gates
 
@@ -133,9 +132,8 @@ kimi-harness plan --model kimi-k3 --select stage:regression --format summary
 
 Use the correct verified model profile, not K3 as a shortcut for K3.1 Pro.
 Selectors are unions: `--select role:gate --select stage:conversation` does not
-mean their intersection. Use exact ids to freeze a precise bounded scope.
-Stages are explicit metadata: `protocol`, `tooling`, `conversation`,
-`robustness`, `regression`. Components are hints, not diagnoses.
+mean their intersection. Use exact ids to freeze a bounded scope; see the
+[taxonomy](capability-taxonomy.md) for metadata. Components are hints, not diagnoses.
 
 Roles are independent of determinism and requirements:
 
@@ -147,7 +145,7 @@ Roles are independent of determinism and requirements:
 Required gate rows feed `gate_summary`; unknown gate obligations remain gaps.
 Known unsupported cases are not mandatory applicable gates. The summary covers
 **only selected required gates**, never the entire model requirement inventory.
-Read overall status/result_counts as well: invalid execution, diagnostic
+Read overall status and `gate_summary.result_counts` as well: invalid execution, diagnostic
 failures and observations are not concealed by a green gate subset. No score or
 vendor acceptance is produced.
 

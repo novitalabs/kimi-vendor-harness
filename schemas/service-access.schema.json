@@ -10,7 +10,7 @@
     "served_model": {"type": "string", "minLength": 1},
     "api_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
     "headers": {"type": "object", "additionalProperties": {"type": "string"}},
-    "think_mode": {"type": "string", "minLength": 1},
+    "think_mode": {"enum": ["kimi", "opensource"]},
     "deployment_id": {"type": "string"},
     "runtime_id": {"type": "string"},
     "source_targets": {

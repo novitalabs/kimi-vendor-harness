@@ -92,6 +92,21 @@ def test_doctor_blocks_access_model_mismatch_and_unsupported_selection(tmp_path,
     assert "selected_cases_unsupported" in {p["code"] for p in json.loads(capsys.readouterr().out)["problems"]}
 
 
+@pytest.mark.parametrize("field,value", [("think_mode", "unsupported"), ("api_key_env", None), ("headers", None)])
+def test_access_schema_rejects_invalid_or_missing_required_fields(tmp_path, capsys, field, value):
+    path = access_file(tmp_path)
+    data = json.loads(path.read_text())
+    if value is None:
+        data.pop(field)
+    else:
+        data[field] = value
+    path.write_text(json.dumps(data))
+    assert main(["doctor", "--service-access", str(path)]) == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["error"]["code"] == "service_access_invalid"
+    assert output["endpoint_requests"] == 0
+
+
 def test_run_requires_ack_before_access_or_traffic(capsys):
     assert main(["run", "--service-access", "/missing.json"]) == 2
     assert json.loads(capsys.readouterr().out)["error"]["code"] == "execute_ack_required"
@@ -131,7 +146,7 @@ def test_parser_validate_does_not_load_endpoint_catalog(monkeypatch, capsys):
     from novita_self_test import cli
     def forbidden(*args, **kwargs):
         pytest.fail("parser command loaded endpoint plan")
-    monkeypatch.setattr(cli, "_plan", forbidden)
+    monkeypatch.setattr(cli, "create_plan", forbidden)
     assert main(["parser", "validate"]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["vector_count"] == 7

@@ -1,87 +1,58 @@
-# Capability taxonomy
+# Case taxonomy and authoring
 
-This repository maintains Kimi agentic **engine behavior**, not model-quality
-benchmarks or formal vendor acceptance. Passing cases do not establish planning,
-reasoning, coding, vision or long-context benchmark scores.
+Each case lives once under `capabilities/<capability>/cases.jsonl`. Source, model,
+regression and transport are metadata, not duplicate trees. Use
+`kimi-harness plan --select all --format summary` for the current inventory.
 
-## Organization
+| Capability area | Boundary to inspect |
+|---|---|
+| `protocol` | API validation / request normalization |
+| `tool_call/choice` | tool context / renderer / grammar selection |
+| `tool_call/declaration` | message parser / renderer / tool registry |
+| Tool arguments and schemas | detokenizer / tool parser / schema conversion / grammar compiler |
+| `structured_output` | response grammar / grammar composition |
+| `reasoning` | request normalization / renderer / reasoning parser |
+| `streaming` | stream assembler / response serializer |
+| `prompt_rendering` | tokenizer / checkpoint encoder / renderer |
+| `usage` | token accounting / response serializer |
+| `conversation_state` | history normalization / id allocator |
+| `multimodal` (knowledge only) | multimodal processor / renderer |
+| `error_handling` | validation / frontend / service boundary |
 
-A case has one primary capability and cross-cutting metadata. It lives once
-under `capabilities/<capability>/`; source, model, regression and transport are
-metadata, not duplicate directory trees. Endpoint case definitions use JSONL;
-the parser vector contract is a separate JSONL file in the prompt-rendering area.
+These are search hints, not diagnoses or claims that every area has endpoint
+coverage. The [knowledge index](../knowledge/README.md) links domain guidance.
 
-| Primary capability | What it observes | Likely implementation boundary |
-|---|---|---|
-| `protocol` | request fields, token limits, validation/defaults | API validation / request normalization |
-| `tool_call/choice` | none/auto/required/named behavior | tool context / renderer / grammar selection |
-| `tool_call/declaration` | global/dynamic tools, names and schemas | message parser / renderer / tool registry |
-| `tool_call/arguments` | JSON arguments, marker data and bad calls | detokenizer / tool parser / response assembly |
-| `tool_call/schema` | constrained arguments, refs and invalid schemas | schema conversion / grammar compiler |
-| `structured_output` | json_object/json_schema and tools combinations | response grammar / grammar composition |
-| `reasoning` | thinking switches, effort and channel boundaries | request normalization / renderer / reasoning parser |
-| `streaming` | raw SSE, tool deltas, finish and usage | stream assembler / response serializer |
-| `prompt_rendering` | literal markers, history and token parity | tokenizer / checkpoint encoder / renderer |
-| `usage` | counts/details and stream/nonstream consistency | token accounting / response serializer |
-| `conversation_state` | tool-result association and continuation | history normalization / id allocator |
-| `multimodal` | image parts and token fixtures, not vision quality | multimodal processor / renderer |
-| `error_handling` | status/error envelope and transport separation | validation / frontend / service boundary |
+## Case contract
 
-## Execution layers
+[`capability-case.schema.json`](../schemas/capability-case.schema.json) defines
+source cases and the shared portion of frozen-plan cases. Required metadata:
+stable id/title/capability, tags, source and adaptation, knowledge links, likely
+components, determinism, role/stage, wire modes, output cap and request steps.
 
-- **endpoint**: raw HTTP request and externally observable response;
-- **parser**: vectors sent to a framework-supplied adapter; no inference traffic;
-- **local**: harness/client invariants checked with fake responses.
+- Roles: `gate`, `diagnostic`, `observation`, `platform`.
+- Stages: `protocol`, `tooling`, `conversation`, `robustness`, `regression`.
+- `requires` adds target requirements; applicability also derives from successful
+  requests. Profiles describe obligations, not implementation progress. See
+  [target contracts and gates](framework-bringup.md).
+- Step-level `thinking`/`effort` is canonical intent translated for the access
+  dialect. Raw alias/conflict probes omit canonical fields and retain wire bytes.
+- Valid completed tool calls always require unique ids, declared names and
+  nonempty JSON-object arguments. There are no per-case syntax opt-out flags.
+  `arguments_schema` adds schema constraints; `first_call_only` limits only the
+  case-specific schema/history checks, not these shared invariants.
+- Tag long-history and platform-specific risky probes `opt_in`; never silently
+  add them to smoke. Requests, source and expected values must be secret-free.
 
-Endpoint tests cannot force a chosen model token sequence. Parser vectors cannot
-prove endpoint generation. Prompt-token equality cannot prove tool-result ordering:
-reordered segments can have the same token count.
+Keep endpoint cases, parser/renderer component vectors and harness pytest tests
+separate. Their evidence is not interchangeable. Use the
+[agent protocol](agent-use.md) for execution/result contracts and
+[bring-up guide](framework-bringup.md) for adapters and response binding.
 
-## Metadata and plan
+## Add a regression
 
-Each endpoint case declares a stable id, title, capability, tags, source path and
-adaptation, knowledge links, likely components, determinism, modes, output cap
-and steps. `kimi-harness plan` reports request count and output-token budget;
-`kimi-harness run` requires `--execute`, a request ceiling and has no implicit
-retries or official repeat waves. `doctor` and `plan` are zero traffic.
-`plan --format summary` lists selected cases; `plan --select all` explicitly
-inspects the full catalog. `parser validate` and `parser run` are separate
-offline commands under the same `kimi-harness` CLI. For agent invocation,
-`plan --service-access ... --out ...` freezes the public target, input-file bytes,
-wire settings and request/oracle hashes; `doctor --plan` verifies it, and
-`run --plan` consumes only verified current snapshots. A plan hash is integrity
-evidence, not authorization. Machine results and stable problem codes are
-specified by `schemas/` and [agent-use.md](agent-use.md).
-
-Profile v2 feature/effort claims declare target obligations, not implementation
-progress: required, optional, unsupported or unknown, with evidence for known
-claims. Missing claims are unknown; selected unknowns/provisional profiles block
-bound execution. The K3.1 Pro profile is a blocked scaffold and inherits no K3
-requirements. A selected KVV case is a development contract, not proof of complete
-official coverage. See [framework-bringup.md](framework-bringup.md).
-
-Every case has an independent role (`gate`, `diagnostic`, `observation`,
-`platform`) and stage (`protocol`, `tooling`, `conversation`, `robustness`,
-`regression`). Select with `role:`/`stage:`; multiple selectors remain a union.
-The gate summary only covers selected required gates; it never hides diagnostic
-failures, observations, incomplete evidence or unimplemented coverage.
-Renderer token-id comparisons are a separate offline component layer. Bounded
-response-binding scenarios consume prior validated call identities and fixed
-canned tool results, never execute generated tool calls. Replanning selects the
-whole case so dependencies stay intact; comparison is local-only.
-
-## Learning loop
-
-1. Reproduce and minimize an incident, with credentials removed.
-2. Add one case under its primary capability.
-3. Link source, regression and knowledge metadata.
-4. Add a fake/negative oracle where possible.
-5. Update the capability knowledge page with symptom, suspected boundary,
-   confirmed cause, fix and versioned evidence.
-
-The default smoke plan is 9 cases / 13 requests. The current endpoint catalog
-has 59 cases; explicit `opt_in` acknowledgement is required for long-history
-and platform-specific negative probes. Parser vectors are separate: 7 vectors
-and 21 offline chunk trials, with no bundled engine adapter. See
-`docs/migration.md` and `sources/provenance.yaml` for the retained/extracted
-boundary.
+Minimize the incident, add one capability case with pinned source/adaptation,
+then add an offline negative oracle test. Record symptom → suspected boundary →
+confirmed cause → fix → versioned evidence in the linked knowledge page. Mark
+confidence (`contract`, `format`, `implementation_choice`, `historical`,
+`unverified`); do not weaken the oracle or import a benchmark score as a pass.
+Source-extraction boundaries are in [migration.md](migration.md).

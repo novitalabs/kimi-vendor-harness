@@ -1,6 +1,6 @@
 [project]
 name = "kimi-agentic-harness"
-version = "0.6.0"
+version = "0.6.1"
 description = "Kimi agentic capability and regression test harness"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -8,7 +8,6 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx==0.28.1",
     "jsonschema>=4.25",
-    "openai==2.14.0",
     "pytest>=8.0",
     "pyyaml>=6.0",
     "referencing==0.37.0",
@@ -17,9 +16,6 @@ dependencies = [
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-markers = [
-    "integration: external artifact integration check",
-]
 
 [tool.setuptools.packages.find]
 where = ["src"]

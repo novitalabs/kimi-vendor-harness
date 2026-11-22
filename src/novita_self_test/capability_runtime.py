@@ -280,7 +280,7 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
     return reply
 
 
-def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *, mode: str | None = None) -> list[dict[str, Any]]:
+def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply]) -> list[dict[str, Any]]:
     problems = [issue("response_incomplete" if error in INCOMPLETE_ERRORS else "response_invalid", error) for error in reply.errors]
     def add(code: str, message: str, expected: Any = None, actual: Any = None, path=None) -> None:
         problems.append(issue(code, message, expected=expected, actual=actual, path=path))
@@ -307,20 +307,18 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
         add("marker_leaked", "structural marker leaked into content")
     if expect.get("reasoning") is False and reply.reasoning:
         add("reasoning_presence_mismatch", "disabled reasoning was emitted", False, True)
+    if expect.get("tools") == "none" and reply.calls:
+        add("tool_call_forbidden", "tool_choice none returned calls", 0, len(reply.calls))
+    for index, call in enumerate(reply.calls):
+        if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
+            add("tool_name_undeclared", "undeclared/unexpected tool", expect["tool_names"], call.get("name"), ["calls", index, "name"])
     # Preserve already observable wire failures; don't judge unfinished JSON/turns.
     if uncertain:
-        if expect.get("tools") == "none" and reply.calls:
-            add("tool_call_forbidden", "tool_choice none returned calls", 0, len(reply.calls))
-        for index, call in enumerate(reply.calls):
-            if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
-                add("tool_name_undeclared", "undeclared/unexpected tool", expect["tool_names"], call.get("name"), ["calls", index, "name"])
         return problems
     if expect.get("finish_reason") and reply.finish_reason != expect["finish_reason"]:
         add("finish_reason_mismatch", "finish reason differs", expect["finish_reason"], reply.finish_reason)
     if expect.get("public_turn") and not (reply.content.strip() or reply.calls):
         add("public_turn_empty", "empty public turn")
-    if expect.get("tools") == "none" and reply.calls:
-        add("tool_call_forbidden", "tool_choice none returned calls", 0, len(reply.calls))
     if expect.get("tools") == "required" and not reply.calls:
         add("tool_call_missing", "required tool call missing")
     if "max_calls" in expect and len(reply.calls) > expect["max_calls"]:
@@ -340,8 +338,6 @@ def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply], *,
     for index, call in enumerate(reply.calls):
         if not call.get("name"):
             add("tool_name_empty", "empty tool name", actual=call.get("name"), path=["calls", index, "name"])
-        if "tool_names" in expect and call.get("name") not in expect["tool_names"]:
-            add("tool_name_undeclared", "undeclared/unexpected tool", expect["tool_names"], call.get("name"), ["calls", index, "name"])
     for index, call in enumerate(reply.calls):
         selected = index == 0 or not expect.get("first_call_only")
         try:
@@ -512,7 +508,6 @@ def prepare_steps(plan: dict[str, Any], service: ServiceAccess, root: Path) -> l
                 if set(expect.get("tool_names", [])) - set(declared):
                     raise ConfigError("case_invalid", f"{case['id']}: oracle names an undeclared tool")
                 expect.setdefault("tool_names", declared)
-                expect.setdefault("arguments_json", True)
                 if request.get("tool_choice") in ("required", "none"):
                     expect.setdefault("tools", request["tool_choice"])
             prepared.append((case, repeat, group, index, mode, step, request, expect))
@@ -531,9 +526,8 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
     opt_in = [case["id"] for case in plan["cases"] if "opt_in" in case.get("tags", []) and not case["missing_requirements"]]
     if opt_in and not allow_opt_in:
         raise ConfigError("opt_in_ack_required", "selected opt-in cases require --allow-opt-in: " + ", ".join(opt_in))
-    units = [(case, *unit) for case in plan["cases"] if not case["missing_requirements"]
-             for unit in iter_case_steps(case, plan["repeat"])]
-    expected_count = len(units)
+    expected_count = plan["repeat"] * sum(1 for case in plan["cases"] if not case["missing_requirements"]
+                                          for _ in iter_case_steps(case, 1))
     if expected_count != plan["request_budget"]:
         raise ConfigError("plan_invalid", "request budget differs from executable plan")
     if expected_count > max_requests:
@@ -593,7 +587,7 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
             actual_requests += 1
             request_sent = True
             reply = client.call(request)
-            problems = assert_reply(reply, expect, history, mode=mode)
+            problems = assert_reply(reply, expect, history)
             status, failure = _outcome(reply, expect, problems)
             if status == "passed" and case.get("determinism") == "observation":
                 status = "observed"

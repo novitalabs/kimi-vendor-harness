@@ -40,11 +40,10 @@ def oracle_validator(schema: dict) -> Draft202012Validator:
 def validate_contract(value: Any, name: str, root: Path | None = None) -> None:
     directory = (root or workspace_root()) / "schemas"
     registry = Registry(retrieve=deny_retrieval)
-    for path in directory.glob("*.schema.json"):
-        schema = json.loads(path.read_text(encoding="utf-8"))
-        registry = registry.with_resource(path.name, Resource.from_contents(schema))
-    schema = json.loads((directory / name).read_text(encoding="utf-8"))
-    error = next(Draft202012Validator(schema, registry=registry).iter_errors(value), None)
+    schemas = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in directory.glob("*.schema.json")}
+    for filename, schema in schemas.items():
+        registry = registry.with_resource(filename, Resource.from_contents(schema))
+    error = next(Draft202012Validator(schemas[name], registry=registry).iter_errors(value), None)
     if error:
         location = "/".join(str(part) for part in error.absolute_path)
         raise ConfigError("output_contract_invalid", f"{name} at {location}: {error.message}")

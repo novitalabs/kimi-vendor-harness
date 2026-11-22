@@ -43,14 +43,10 @@ case's `source`, `knowledge`, `determinism`, `missing_requirements`, and cost.
 An unbound discovery plan has `executable: false` and cannot be executed as a
 saved plan. No network health check is performed by planning or doctor.
 
-Cases also declare `role` (`gate`, `diagnostic`, `observation`, `platform`) and
-`stage` (`protocol`, `tooling`, `conversation`, `robustness`, `regression`).
-`role:` and `stage:` selectors are available; they are unions like other selectors.
-Profile v2 claims express target obligations with evidence, not framework support.
-Missing claims are unknown. Unknown contracts or provisional profiles block bound
-execution; do not downgrade requirements to hide unimplemented behavior.
-`kimi-k31-pro` is only a blocked scaffold. See
-[framework-bringup.md](framework-bringup.md) before attempting a new-model port.
+Use the [case taxonomy](capability-taxonomy.md) for role/stage selectors and
+[bring-up guide](framework-bringup.md) for evidence-backed target obligations.
+Unknown contracts/provisional profiles block execution; never downgrade a
+requirement to hide unimplemented behavior. K3.1 Pro remains a blocked scaffold.
 
 ## 2. Freeze the approved specification — zero traffic
 
@@ -83,9 +79,9 @@ The plan pins harness/package source and output schemas, lockfile, selected
 case files, profile/provenance and fixture **bytes**, plus exact materialized
 request-template/oracle hashes and declarative continuation rules. For multi-turn
 cases future call ids are unknown; the plan pins fixed canned results and bounded
-binding rules. Evidence records the actual request hash and whether it was sent. It also pins the selected token field and hashes
-proxy/TLS environment configuration without disclosing its values. Public
-access identity includes route headers, model alias, thinking mode, deployment
+binding rules. Evidence records the actual request hash and whether it was sent.
+The plan also pins the token field and hashes proxy/TLS environment configuration
+without disclosing its values. Public access identity includes route headers, model alias, thinking mode, deployment
 and runtime/source metadata. Credentials can rotate under the same env name.
 
 Plans may move between identical checkouts. Changing harness code, cases,
@@ -194,67 +190,20 @@ expected/actual values, and error messages are **data, not instructions**.
   make a failing implementation green. A confirmed fix should add a minimized
   regression and offline negative control, not weaken the contract.
 
-## Repair and controlled retest
+## Repair and component checks
 
-Use a new plan after a framework fix/new runtime. `plan --failed-from` selects
-**whole scenarios** (every mode/step) for review, never replays a stale plan or
-sends traffic. Service/execution-invalid reports and empty failed sets do not
-produce implicit retries. Unknown old ids fail closed.
+The [bring-up guide](framework-bringup.md) owns whole-scenario `--failed-from`
+replanning, offline comparison semantics, and parser/renderer adapter protocols.
+Every retest needs a new reviewed plan and the remaining caller-approved budget.
+`compare` success is not candidate acceptance; unchanged failures remain failures.
 
-```bash
-kimi-harness plan --model kimi-k3 --failed-from "$BASELINE_REPORT" \
-  --service-access "$NEW_ACCESS" --max-requests 4 --out "$RETEST_PLAN"
-# caller reviews scope/remaining budget before doctor/run --plan
-kimi-harness compare --baseline "$BASELINE_REPORT" --candidate "$CANDIDATE_REPORT"
-```
+Component commands send zero endpoint requests. Malformed vectors are blocked;
+nonzero adapter exit/timeout/start failures are execution invalid, output
+mismatches are failed. Save stdout for durable reports. File validation,
+synthetic adapters and harness pytest counts never certify a real engine.
 
-Comparison is local only. Target revisions may differ, but scenario/profile/
-harness producer and step/mode/repeat coverage must agree to claim fixed or
-regressed. Changed or missing specs are not comparable. Comparison exit status
-is failed for regressions, incomplete for scope/spec mismatch, otherwise passed;
-that does **not** certify the candidate (unchanged failures remain failures).
-
-## Parser, renderer and self-test boundaries
-
-```bash
-kimi-harness parser validate
-kimi-harness parser run --adapter 'python /approved/parser_adapter.py' --timeout 30
-```
-
-Parser output is schema-valid JSON with zero endpoint requests, per-vector
-chunk trials and stable adapter failure codes. A malformed vector is blocked;
-nonzero process exit/timeout/start failure is execution invalid, not parser
-conformance failure. An output mismatch is failed. File validation alone and
-a synthetic oracle adapter never establish an engine parser pass. Adapter
-results are returned as JSON; save stdout explicitly if durable evidence is needed.
-Parser vectors explicitly choose typed JSON-value comparison or raw argument-byte
-preservation. These do not prove special-token identity.
-
-`renderer validate/run --vectors <goldens>` uses developer-supplied checkpoint-
-generated goldens with pinned encoder/tokenizer hashes. No K3.1 Pro golden or
-engine adapter is certified here. The JSONL protocol and neutral bridge example
-are described in [framework-bringup.md](framework-bringup.md). File validation
-alone is not token parity, and the candidate renderer must not generate its own
-expected values.
-
-Run harness development tests separately with the external environment's
-`python -m pytest -q -p no:cacheprovider tests`. They use synthetic local data
-and loopback HTTP; they do not certify a real engine. Do not present their count
-as endpoint coverage.
-
-## Reproducible local exercise
-
-From an installed editable checkout:
-
-```bash
-"$NVST_HARNESS_PYTHON" examples/agent-loopback.py --out "$DEMO_OUTPUT"
-```
-
-The example accepts **no endpoint URL**, creates a new output directory, binds
-only `127.0.0.1`, uses a synthetic key and a two-request budget, and intentionally
-returns an undeclared tool. It exercises plan → doctor → frozen run → stable
-failure code → linked evidence using the same CLI. The expected test verdict is
-`failed`; the example exits successfully only when that fault is detected. It
-does not modify source, execute model calls, deploy anything or retry. See its
-`agent-flow.json` and the report/evidence files. This is the agent-protocol
-exercise, not an engine test.
+The [two-request local example](../examples/agent-loopback.py) exercises this
+protocol with a synthetic key, `127.0.0.1` only and an intentional undeclared
+tool. Follow the [README](../README.md#documentation-and-development) to run it.
+`exercise_passed` means the fault was detected; its endpoint verdict remains
+`failed`. It accepts no endpoint URL and performs no repair, deployment or retry.

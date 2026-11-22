@@ -123,12 +123,10 @@ class ServiceAccess:
         parsed = urlsplit(raw["base_url"])
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ConfigError("service_access_invalid", "base_url must be HTTP(S) without userinfo, query or fragment")
-        if raw.get("think_mode", "opensource") not in {"kimi", "opensource"}:
-            raise ConfigError("service_access_invalid", "think_mode must be kimi or opensource")
         return cls(
             model_family=raw["model_family"], base_url=raw["base_url"].rstrip("/"),
-            served_model=raw["served_model"], api_key_env=raw.get("api_key_env", "KIMI_API_KEY"),
-            headers=dict(raw.get("headers", {})), think_mode=raw.get("think_mode", "opensource"),
+            served_model=raw["served_model"], api_key_env=raw["api_key_env"],
+            headers=dict(raw["headers"]), think_mode=raw["think_mode"],
             deployment_id=raw.get("deployment_id", ""), runtime_id=raw.get("runtime_id", ""),
             source_targets=tuple(raw.get("source_targets", [])),
         )

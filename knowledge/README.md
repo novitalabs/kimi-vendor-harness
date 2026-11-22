@@ -29,13 +29,7 @@ verification; K3 values must not silently become K3.1 ground truth.
 - [Errors](error_handling/README.md)
 - [Regressions](regressions/README.md)
 
-## Learning loop
-
-A fix should add a minimized case plus a negative oracle test, then update the
-capability page with symptom → suspected boundary → confirmed cause → fix →
-versioned evidence. Keep request bodies credential-free. Link the case id and
-source commit. Mark confidence (`contract`, `format`, `implementation_choice`,
-`historical`, `unverified`) rather than treating every handoff statement equally.
-
-Framework-neutral component hints are search starting points. For one pinned
-vLLM implementation, see [source map](frameworks/vllm-int.md).
+For new regressions, follow the
+[case-authoring workflow](../docs/capability-taxonomy.md#add-a-regression).
+Component hints are search starting points, not proof. For a pinned vLLM
+implementation, see the [source map](frameworks/vllm-int.md).
