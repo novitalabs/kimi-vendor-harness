@@ -1,0 +1,23 @@
+{
+  "id": "protocol.public_reply",
+  "title": "A basic public reply remains available",
+  "capability": "protocol",
+  "tags": ["development"],
+  "source": {
+    "id": "harness_regressions",
+    "path": "examples/case-template.json",
+    "adaptation": "Authoring template only. Replace with the actual incident/source and oracle before committing a new case."
+  },
+  "knowledge": ["knowledge/protocol/README.md"],
+  "likely_components": ["request_validation", "response_assembly"],
+  "determinism": "contract",
+  "role": "gate",
+  "stage": "protocol",
+  "modes": ["nonstream"],
+  "max_output_tokens": 64,
+  "steps": [{
+    "thinking": false,
+    "request": {"messages": [{"role": "user", "content": "Reply with OK."}]},
+    "expect": {"status": 200, "public_turn": true, "reasoning": false, "finish_reason": "stop"}
+  }]
+}

@@ -19,10 +19,11 @@ def issue(code: str, message: str, *, expected: Any = None, actual: Any = None,
     return {"code": code, "message": message, "expected": expected, "actual": actual, "path": path or []}
 
 
-def error_result(command: str, code: str, message: str, *, endpoint_requests: int | None = 0) -> dict[str, Any]:
+def error_result(command: str, code: str, message: str, *, endpoint_requests: int | None = 0,
+                 path: list[str | int] | None = None, expected: Any = None, actual: Any = None) -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "kind": "error", "command": command,
             "status": "blocked" if endpoint_requests == 0 else "execution_invalid",
-            "error": issue(code, message), "endpoint_requests": endpoint_requests}
+            "error": issue(code, message, path=path, expected=expected, actual=actual), "endpoint_requests": endpoint_requests}
 
 
 def exit_code(result: dict[str, Any]) -> int:

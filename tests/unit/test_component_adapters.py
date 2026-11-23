@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 import shlex
+import subprocess
 import sys
 
 from novita_self_test.renderer_conformance import run
@@ -44,6 +46,18 @@ def test_renderer_requires_provenance_and_handles_adapter_timeout(tmp_path):
     result = run(vectors, shlex.join([sys.executable, str(adapter)]), .1)
     assert result["status"] == "execution_invalid"
     assert result["problems"][0]["code"] == "adapter_timeout"
+
+
+def test_parser_bridge_calls_approved_function_not_expected_outputs(tmp_path):
+    bridge = tmp_path / "bridge.py"
+    bridge.write_text('def parse(request):\n assert "expected" not in request\n assert "".join(request["chunks"]) == request["text"]\n return {"reasoning":"", "content":request["text"], "tool_calls":[]}\n')
+    script = tmp_path / "parser-adapter.py"
+    script.write_text((Path(__file__).resolve().parents[2] / "examples/parser-adapter.py").read_text())
+    request = {"id": "synthetic", "text": "abc", "chunks": ["a", "bc"], "tools": [], "finish": "stop"}
+    process = subprocess.run([sys.executable, str(script), "--function", "bridge:parse"],
+                             input=json.dumps(request)+"\n", text=True, capture_output=True, timeout=5)
+    assert process.returncode == 0, process.stderr
+    assert json.loads(process.stdout) == {"reasoning": "", "content": "abc", "tool_calls": []}
 
 
 def test_parser_semantic_json_and_raw_byte_contract_are_distinct():

@@ -37,6 +37,7 @@ access metadata or argv; see [credentials](docs/credentials.md).
 | Command | Purpose | Endpoint traffic |
 |---|---|---|
 | `plan` | Select cases, inspect requirements and budgets, freeze a target | None |
+| `lint` | Validate all cases or exact files/ids with source locations | None |
 | `doctor` | Verify local configuration, credential env and saved plan | None |
 | `run` | Execute bounded endpoint cases | Requires `--execute` |
 | `parser validate/run` | Validate vectors / run an approved local parser adapter | None |
@@ -63,11 +64,25 @@ fixtures, profiles, wire configuration or public target identity need a new plan
 Plan hashes detect drift, not authorization or live-backend identity.
 
 Selectors accept ids, capability paths, globs, `tag:`, `component:`, `role:` and
-`stage:`. Multiple selectors form a **union**. Endpoint commands default to
-`smoke`; `all` is explicit. Inspect directory selections because they include
-negative tests. Roles distinguish required gates from diagnostics, observations
-and platform policy; `gate_summary` covers selected required gates only.
-See the [case taxonomy](docs/capability-taxonomy.md).
+`stage:`. Multiple `--select` values form a **union**; plan's `--filter` values
+are AND refinements, and `--exclude` subtracts matches. Unknown selectors return
+suggestions, never auto-select. Endpoint commands default to `smoke`; `all` is
+explicit. Inspect directory selections because they include negative tests.
+Roles distinguish gates, diagnostics, observations and platform policy;
+`gate_summary` covers selected required gates only.
+
+```bash
+# Focus on gate cases involving the tool parser; no endpoint traffic.
+kimi-harness plan --select role:gate --filter component:tool_parser --format catalog
+# Edit a case at the file:line shown by catalog/summary, then validate locally.
+kimi-harness lint --file capabilities/tool_call/choice/cases.jsonl --id tool_call.choice.required
+kimi-harness lint  # full catalog before sharing changes
+```
+
+`--format catalog` is a compact JSON discovery view with locators, requirements,
+source and knowledge links, not a saved execution plan. Only default JSON plans
+can execute. Start new cases from [the template](examples/case-template.json);
+see [case authoring](docs/capability-taxonomy.md).
 
 Safety limits remain: concurrency 1, no implicit retry, request/output ceilings,
 per-request wall-clock timeout, 16 MiB response cap, and stop on service/transport
@@ -90,16 +105,22 @@ kimi-harness parser validate
 kimi-harness parser run --adapter 'python /approved/parser_adapter.py' --timeout 30
 kimi-harness renderer run --vectors /pinned/goldens.jsonl \
   --adapter 'python /approved/renderer_adapter.py' --timeout 30
-kimi-harness plan --model kimi-k3 --failed-from /baseline/report.json \
+kimi-harness plan --model kimi-k3 --failed-from /baseline/report.json --repeat 1 \
   --service-access "$NEW_ACCESS" --max-requests 4 --out "$RETEST_PLAN"
-kimi-harness compare --baseline /baseline/report.json --candidate /candidate/report.json
+kimi-harness compare --baseline /baseline/report.json --candidate /candidate/report.json \
+  --scope candidate
 ```
 
 Adapters run approved local code, not sandboxed code. The seven parser vectors /
 21 chunk trials are reference-derived; no certified engine adapter or K3.1 Pro
 checkpoint golden is bundled. File validation is not component conformance.
-Replanning selects whole scenarios but never executes/retries them. Comparison
-is not candidate acceptance, and changed specs/scope are not comparable.
+Replanning selects whole scenarios but never executes/retries them. Retests
+require an explicit `--repeat`; the new plan records the baseline and any repeat
+change for review. Compare checks each mode/step/repeat, so a fix cannot conceal
+a new regression. Default scope is all cases; explicit `--scope candidate`
+compares retested cases and lists the rest as `not_retested`, not passed.
+Changed specifications or unit coverage remain not comparable. No comparison
+status is candidate acceptance.
 
 ## Documentation and development
 

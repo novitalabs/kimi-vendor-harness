@@ -417,7 +417,8 @@ def test_failed_parent_skips_bound_followup_without_spending_its_budget(endpoint
         assert report["results"][1]["status"] == "not_run"
 
 
-def test_failed_report_replans_whole_case_for_new_runtime_and_compares_offline(endpoint, tmp_path, capsys):
+@pytest.mark.parametrize("repeat", [1, 2])
+def test_failed_report_replans_whole_case_for_new_runtime_and_compares_offline(endpoint, tmp_path, capsys, repeat):
     broken = True
     def respond(handler, request, n):
         if request["stream"]:
@@ -430,25 +431,64 @@ def test_failed_report_replans_whole_case_for_new_runtime_and_compares_offline(e
     with endpoint(respond) as (access, requests):
         path, plan_path = tmp_path / "access.json", tmp_path / "plan.json"
         path.write_text(json.dumps(access.public_dict()))
-        assert main(["run", "--select", "tool_call.choice.required", "--service-access", str(path), "--max-requests", "2", "--execute"]) == 1
+        budget = str(2 * repeat)
+        assert main(["run", "--select", "tool_call.choice.required", "--repeat", str(repeat), "--service-access", str(path), "--max-requests", budget, "--execute"]) == 1
         first = json.loads(capsys.readouterr().out)
         before = Path(first["run_dir"]) / "report.json"
         changed = access.public_dict()
         changed["runtime_id"] = "synthetic-fixed-runtime"
         path.write_text(json.dumps(changed))
-        assert main(["plan", "--failed-from", str(before), "--service-access", str(path), "--max-requests", "2", "--out", str(plan_path)]) == 0
+        assert main(["plan", "--failed-from", str(before), "--service-access", str(path), "--max-requests", "2"]) == 2
+        error = json.loads(capsys.readouterr().out)
+        assert error["error"]["code"] == "retest_repeat_required"
+        assert error["error"]["expected"]["baseline_repeat"] == repeat
+        if repeat == 2:
+            assert main(["plan", "--failed-from", str(before), "--repeat", "1", "--service-access", str(path), "--max-requests", "2"]) == 0
+            changed_plan = json.loads(capsys.readouterr().out)
+            assert changed_plan["retest"]["repeat_changed"] and changed_plan["request_budget"] == 2
+        assert main(["plan", "--failed-from", str(before), "--repeat", str(repeat), "--service-access", str(path), "--max-requests", budget, "--out", str(plan_path)]) == 0
         plan = json.loads(capsys.readouterr().out)
+        assert not plan["retest"]["repeat_changed"]
+        assert plan["retest"]["baseline_units"] == 2 * repeat
         assert [case["id"] for case in plan["cases"]] == ["tool_call.choice.required"]
-        assert len(requests) == 2
+        assert len(requests) == 2 * repeat
         broken = False
         assert main(["run", "--plan", str(plan_path), "--service-access", str(path), "--execute"]) == 0
         second = json.loads(capsys.readouterr().out)
         after = Path(second["run_dir"]) / "report.json"
-        assert len(requests) == 4
+        assert len(requests) == 4 * repeat
         assert main(["compare", "--baseline", str(before), "--candidate", str(after)]) == 0
         result = json.loads(capsys.readouterr().out)
         assert result["changes"][0]["transition"] == "fixed"
         assert result["endpoint_requests"] == 0
+        assert len(requests) == 4 * repeat
+
+
+def test_cli_compare_reports_both_fixed_and_regressed_modes(endpoint, tmp_path, capsys):
+    candidate = False
+    def respond(handler, request, n):
+        wrong = request["stream"] if candidate else not request["stream"]
+        if request["stream"]:
+            chunks = frames()
+            if wrong:
+                chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] = "wrong"
+            send(handler, stream=True, raw=sse(chunks))
+        else:
+            send(handler, body=completion(calls=[call(name="wrong" if wrong else "get_weather")]))
+    with endpoint(respond) as (access, requests):
+        path = tmp_path / "access.json"
+        path.write_text(json.dumps(access.public_dict()))
+        reports = []
+        for is_candidate in (False, True):
+            candidate = is_candidate
+            assert main(["run", "--service-access", str(path), "--select", "tool_call.choice.required", "--max-requests", "2", "--execute"]) == 1
+            value = json.loads(capsys.readouterr().out)
+            reports.append(str(Path(value["run_dir"]) / "report.json"))
+        assert len(requests) == 4
+        assert main(["compare", "--baseline", reports[0], "--candidate", reports[1]]) == 1
+        result = json.loads(capsys.readouterr().out)
+        assert result["status"] == "failed"
+        assert [unit["transition"] for unit in result["changes"][0]["units"]] == ["fixed", "regressed"]
         assert len(requests) == 4
 
 

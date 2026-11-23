@@ -57,6 +57,23 @@ def test_plan_out_matches_stdout_and_repeat_budget(tmp_path, capsys, format):
         assert "No endpoint traffic generated" in text
 
 
+def test_catalog_refinement_suggestions_and_lint(capsys):
+    assert main(["plan", "--select", "role:gate", "--filter", "component:tool_parser", "--format", "catalog"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["kind"] == "case_catalog"
+    assert len(result["cases"]) == 7 and result["request_budget"] == 14
+    assert all(case["file"] and case["line"] > 0 and "steps" not in case for case in result["cases"])
+    assert main(["plan", "--select", "tool_call/choice", "--exclude", "tag:negative", "--format", "catalog"]) == 0
+    assert not any("negative" in row["tags"] for row in json.loads(capsys.readouterr().out)["cases"])
+    assert main(["plan", "--select", "component:tool_parsr"]) == 2
+    problem = json.loads(capsys.readouterr().out)["error"]
+    assert "component:tool_parser" in problem["expected"]["suggestions"]
+    assert main(["lint", "--file", "capabilities/tool_call/choice/cases.jsonl", "--id", "tool_call.choice.required"]) == 0
+    lint = json.loads(capsys.readouterr().out)
+    assert lint["kind"] == "case_lint" and lint["cases"][0]["line"] == 2
+    assert lint["endpoint_requests"] == 0
+
+
 def access_file(tmp_path, **overrides):
     data = {"model_family": "kimi-k3", "base_url": "http://127.0.0.1:1/v1",
             "served_model": "some-custom-deployment", "api_key_env": "CLI_TEST_KEY",

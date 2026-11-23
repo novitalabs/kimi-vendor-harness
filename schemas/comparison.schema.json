@@ -1,13 +1,32 @@
 {
- "$schema":"https://json-schema.org/draft/2020-12/schema", "type":"object", "additionalProperties":false,
- "required":["schema_version","kind","status","endpoint_requests","baseline_run","candidate_run","changes","retest_case_ids","warning"],
- "properties":{
-  "schema_version":{"const":1},"kind":{"const":"report_comparison"},"status":{"enum":["passed","failed","incomplete"]},"endpoint_requests":{"const":0},
-  "baseline_run":{"type":"string"},"candidate_run":{"type":"string"},
-  "changes":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","before","after","transition","candidate_evidence"],"properties":{
-   "id":{"type":"string"},"before":{"type":["string","null"]},"after":{"type":["string","null"]},
-   "transition":{"enum":["fixed","regressed","unchanged","changed_evidence","not_comparable"]},
-   "candidate_evidence":{"type":"array","items":{"type":"string"}}
-  }}},"retest_case_ids":{"type":"array","items":{"type":"string"}},"warning":{"type":"string"}
- }
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "endpoint_requests", "baseline_run", "candidate_run", "changes", "scope", "not_retested", "retest_case_ids", "warning"],
+  "properties": {
+    "schema_version": {"const": 2}, "kind": {"const": "report_comparison"},
+    "status": {"enum": ["passed", "failed", "incomplete"]}, "endpoint_requests": {"const": 0},
+    "baseline_run": {"type": "string"}, "candidate_run": {"type": "string"},
+    "scope": {"enum": ["all", "candidate"]}, "not_retested": {"type": "array", "items": {"type": "string"}},
+    "changes": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "before", "after", "transition", "candidate_evidence", "units"],
+      "properties": {
+        "id": {"type": "string"}, "before": {"type": ["string", "null"]}, "after": {"type": ["string", "null"]},
+        "transition": {"$ref": "#/$defs/transition"}, "candidate_evidence": {"type": "array", "items": {"type": "string"}},
+        "units": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["repeat", "group", "step", "mode", "before", "after", "transition", "before_codes", "after_codes"],
+          "properties": {
+            "repeat": {"type": "integer", "minimum": -1}, "group": {"type": "integer", "minimum": -1},
+            "step": {"type": "integer", "minimum": -1}, "mode": {"enum": ["stream", "nonstream", ""]},
+            "before": {"type": "string"}, "after": {"type": "string"}, "transition": {"$ref": "#/$defs/transition"},
+            "before_codes": {"type": "array", "items": {"type": "string"}},
+            "after_codes": {"type": "array", "items": {"type": "string"}}
+          }
+        }}
+      }
+    }},
+    "retest_case_ids": {"type": "array", "items": {"type": "string"}}, "warning": {"type": "string"}
+  },
+  "$defs": {"transition": {"enum": ["fixed", "regressed", "unchanged", "changed_evidence", "not_comparable"]}}
 }

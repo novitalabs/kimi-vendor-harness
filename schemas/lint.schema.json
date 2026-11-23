@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "endpoint_requests", "scope", "cases", "problems", "warning"],
+  "properties": {
+    "schema_version": {"const": 1}, "kind": {"const": "case_lint"}, "status": {"enum": ["passed", "failed"]},
+    "endpoint_requests": {"const": 0}, "warning": {"type": "string"},
+    "scope": {"type": "object", "additionalProperties": false, "required": ["files", "ids", "full_catalog"], "properties": {
+      "files": {"type": "array", "items": {"type": "string"}}, "ids": {"type": "array", "items": {"type": "string"}}, "full_catalog": {"type": "boolean"}
+    }},
+    "cases": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "file", "line"], "properties": {
+      "id": {"type": "string"}, "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1}
+    }}},
+    "problems": {"type": "array", "items": {"$ref": "problem.schema.json"}}
+  }
+}

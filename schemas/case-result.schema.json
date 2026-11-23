@@ -70,6 +70,10 @@
     "evidence": {
       "type": "string"
     },
+    "locator": {
+      "type": "object", "additionalProperties": false, "required": ["file", "line"],
+      "properties": {"file": {"type": "string"}, "line": {"type": "integer", "minimum": 1}}
+    },
     "role": {
       "enum": [
         "gate",

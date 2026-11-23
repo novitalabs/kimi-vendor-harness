@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
 import json
 import math
@@ -15,17 +14,18 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from .case_catalog import iter_case_steps, read_request
+from .case_catalog import iter_case_steps
 from .config import ConfigError, ServiceAccess, canonical_hash, redact, results_root, strict_json, workspace_root
 from .contracts import issue, oracle_validator, validate_contract
 from .target_contract import gate_summary
 from .scenario_binding import bind_request
 from .report_comparison import scenario_identity
+from .request_preparation import MAX_RESPONSE_BYTES, prepare_steps, token_parameter
+from .wire_issue import WireIssue
+from .execution_plan import verify_plan
 
 MARKERS = ("<|open|>", "<|close|>", "<|sep|>", "<|end_of_msg|>")
-MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 FINISH_REASONS = {"stop", "length", "tool_calls", "content_filter"}
-INCOMPLETE_ERRORS = {"missing finish_reason", "missing DONE marker", "expected one finish frame, observed 0", "empty SSE stream"}
 SAFE_HEADERS = {
     "content-type", "date", "server", "traceparent", "x-request-id", "x-trace-id",
     "msh-request-id", "x-msh-trace-id", "x-moongate-request-id", "x-msh-providerdeployid",
@@ -37,14 +37,7 @@ def safe_response_headers(headers: dict[str, str]) -> dict[str, str]:
     return {key.lower(): value for key, value in headers.items() if key.lower() in SAFE_HEADERS}
 
 
-def token_parameter() -> str:
-    value = os.environ.get("NVST_TOKEN_PARAM", os.environ.get("KVV_TOKEN_PARAM", "max_tokens"))
-    if value not in {"max_tokens", "max_completion_tokens"}:
-        raise ConfigError("token_parameter_invalid", "use max_tokens or max_completion_tokens")
-    return value
-
-
-def service_failure(status: int | None, raw: str = "", errors: list[str] | None = None) -> str | None:
+def service_failure(status: int | None, raw: str = "", errors: list[WireIssue] | None = None) -> str | None:
     if status in {401, 403, 407}:
         return "service_invalid"
     # Never interpret model-generated text as authentication/quota metadata.
@@ -61,7 +54,7 @@ def service_failure(status: int | None, raw: str = "", errors: list[str] | None 
             return "rate_limited"
         if status >= 500:
             return "service_unavailable"
-    if status is None or any(error.startswith("transport failure:") for error in errors or []):
+    if status is None or any(error.category == "transport" for error in errors or []):
         return "execution_invalid"
     return None
 
@@ -79,17 +72,17 @@ class Reply:
     chunks: list[dict[str, Any]] = field(default_factory=list)
     done: bool = False
     incomplete: bool = False
-    errors: list[str] = field(default_factory=list)
+    errors: list[WireIssue] = field(default_factory=list)
     raw_bytes_sha256: str | None = None
     invalid_utf8: list[dict[str, Any]] = field(default_factory=list)
     timing: dict[str, Any] = field(default_factory=dict)
 
 
-def _text(value: Any, label: str, errors: list[str]) -> str:
+def _text(value: Any, label: str, errors: list[WireIssue]) -> str:
     if value is None:
         return ""
     if not isinstance(value, str):
-        errors.append(f"response shape: {label} must be a string")
+        errors.append(WireIssue("field_type_invalid", f"response shape: {label} must be a string"))
         return ""
     return value
 
@@ -139,14 +132,14 @@ def _sse_payloads(text: str) -> list[str]:
     return events
 
 
-def _envelope(body: dict, *, stream: bool, errors: list[str]) -> None:
+def _envelope(body: dict, *, stream: bool, errors: list[WireIssue]) -> None:
     for key in ("id", "model"):
         if not isinstance(body.get(key), str) or not body[key]:
-            errors.append(f"response envelope: {key} must be a nonempty string")
+            errors.append(WireIssue("envelope_field_invalid", f"response envelope: {key} must be a nonempty string"))
     if body.get("object") != ("chat.completion.chunk" if stream else "chat.completion"):
-        errors.append("response envelope: unexpected object type")
+        errors.append(WireIssue("envelope_object_invalid", "response envelope: unexpected object type"))
     if type(body.get("created")) is not int or body["created"] < 0:
-        errors.append("response envelope: created must be a nonnegative integer")
+        errors.append(WireIssue("envelope_created_invalid", "response envelope: created must be a nonnegative integer"))
 
 
 def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str] | None = None) -> Reply:
@@ -165,36 +158,36 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
                 raise ValueError("choice index must be zero")
             message = _object(choice.get("message"), "message")
             if message.get("role") != "assistant":
-                reply.errors.append("message.role must be assistant")
+                reply.errors.append(WireIssue("message_role_invalid", "message.role must be assistant"))
             reply.content = _text(message.get("content"), "content", reply.errors)
             reply.reasoning = _text(message.get("reasoning_content"), "reasoning_content", reply.errors)
             for index, call in enumerate(_list(message.get("tool_calls"), "tool_calls", optional=True)):
                 call = _object(call, "tool call")
                 function = _object(call.get("function"), "tool function")
                 if call.get("type") != "function":
-                    reply.errors.append("tool_call.type must be function")
+                    reply.errors.append(WireIssue("tool_type_invalid", "tool_call.type must be function"))
                 reply.calls.append({"id": _text(call.get("id"), "tool id", reply.errors),
                                     "name": _text(function.get("name"), "tool name", reply.errors),
                                     "arguments": _text(function.get("arguments"), "arguments", reply.errors),
                                     "index": index})
             reply.finish_reason = _text(choice.get("finish_reason"), "finish_reason", reply.errors) or None
             if reply.finish_reason is None:
-                reply.errors.append("missing finish_reason")
+                reply.errors.append(WireIssue("finish_reason_missing", "missing finish_reason", "incomplete"))
                 reply.incomplete = True
             _capture_usage(reply, body)
             return reply
         if headers is not None and "text/event-stream" not in reply.headers.get("content-type", "").lower():
-            reply.errors.append("stream Content-Type must be text/event-stream")
+            reply.errors.append(WireIssue("stream_content_type_invalid", "stream Content-Type must be text/event-stream"))
         slots: dict[int, dict[str, Any]] = {}
         finish_count, summary_count, choice_count = 0, 0, 0
         constants: dict[str, Any] = {}
         for payload in _sse_payloads(text):
             if reply.done:
-                reply.errors.append("data after DONE")
+                reply.errors.append(WireIssue("stream_data_after_done", "data after DONE"))
             if payload.strip() == "[DONE]":
                 reply.done = True
                 if not finish_count:
-                    reply.errors.append("DONE before finish frame")
+                    reply.errors.append(WireIssue("stream_done_before_finish", "DONE before finish frame"))
                 continue
             chunk = _object(strict_json(payload), "chunk")
             _envelope(chunk, stream=True, errors=reply.errors)
@@ -202,48 +195,48 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
             for key in ("id", "model", "created"):
                 if key in chunk:
                     if key in constants and chunk[key] != constants[key]:
-                        reply.errors.append(f"stream {key} changed")
+                        reply.errors.append(WireIssue("stream_envelope_changed", f"stream {key} changed"))
                     constants[key] = chunk[key]
             choices = _list(chunk.get("choices"), "chunk choices")
             _capture_usage(reply, chunk)
             if not choices:
                 summary_count += 1
                 if not finish_count or usage_of(chunk) is None:
-                    reply.errors.append("usage summary must follow finish and contain usage")
+                    reply.errors.append(WireIssue("stream_usage_order_invalid", "usage summary must follow finish and contain usage"))
                 if summary_count > 1:
-                    reply.errors.append("duplicate usage summary")
+                    reply.errors.append(WireIssue("stream_usage_duplicate", "duplicate usage summary"))
                 continue
             if len(choices) != 1:
-                reply.errors.append("expected one stream choice")
+                reply.errors.append(WireIssue("stream_choice_count_invalid", "expected one stream choice"))
             for choice in choices:
                 choice = _object(choice, "choice")
                 if type(choice.get("index")) is not int or choice["index"] != 0:
-                    reply.errors.append("choice index must be zero")
+                    reply.errors.append(WireIssue("choice_index_invalid", "choice index must be zero"))
                     continue
                 if finish_count:
-                    reply.errors.append("choice data after finish frame")
+                    reply.errors.append(WireIssue("stream_data_after_finish", "choice data after finish frame"))
                 delta = _object(choice.get("delta"), "delta")
                 if not choice_count and delta.get("role") != "assistant":
-                    reply.errors.append("first delta.role must be assistant")
+                    reply.errors.append(WireIssue("stream_role_missing", "first delta.role must be assistant"))
                 if choice_count and "role" in delta:
-                    reply.errors.append("role repeated after first delta")
+                    reply.errors.append(WireIssue("stream_role_repeated", "role repeated after first delta"))
                 choice_count += 1
                 reply.content += _text(delta.get("content"), "delta.content", reply.errors)
                 reply.reasoning += _text(delta.get("reasoning_content"), "delta.reasoning_content", reply.errors)
                 if sum(bool(delta.get(key)) for key in ("content", "reasoning_content", "tool_calls")) > 1:
-                    reply.errors.append("stream channels overlap in one delta")
+                    reply.errors.append(WireIssue("stream_channels_overlap", "stream channels overlap in one delta"))
                 if "finish_reason" not in choice:
-                    reply.errors.append("stream choice missing finish_reason")
+                    reply.errors.append(WireIssue("stream_finish_field_missing", "stream choice missing finish_reason"))
                 if choice.get("finish_reason") is not None:
                     finish_count += 1
                     reply.finish_reason = _text(choice["finish_reason"], "finish_reason", reply.errors) or None
                     if delta:
-                        reply.errors.append("finish delta must be empty")
+                        reply.errors.append(WireIssue("stream_finish_delta_invalid", "finish delta must be empty"))
                 for call in _list(delta.get("tool_calls"), "tool_calls", optional=True):
                     call = _object(call, "tool delta")
                     index = call.get("index")
                     if type(index) is not int or index < 0:
-                        reply.errors.append("tool delta missing nonnegative integer index")
+                        reply.errors.append(WireIssue("stream_tool_index_invalid", "tool delta missing nonnegative integer index"))
                         continue
                     first = index not in slots
                     slot = slots.setdefault(index, {"id": "", "name": "", "arguments": "", "index": index})
@@ -252,36 +245,38 @@ def parse_reply(status: int, text: str, *, stream: bool, headers: dict[str, str]
                     call_id = _text(call.get("id"), "tool id", reply.errors)
                     arguments = _text(function.get("arguments"), "arguments", reply.errors)
                     if "arguments" not in function or not isinstance(function["arguments"], str):
-                        reply.errors.append("tool delta arguments must be a string")
+                        reply.errors.append(WireIssue("stream_arguments_type_invalid", "tool delta arguments must be a string"))
                     if first:
                         if not name or not call_id or call.get("type") != "function":
-                            reply.errors.append(f"first tool delta {index} needs id, function type and name")
+                            reply.errors.append(WireIssue("stream_tool_header_invalid", f"first tool delta {index} needs id, function type and name"))
                         if arguments:
-                            reply.errors.append("first tool delta arguments must be empty")
+                            reply.errors.append(WireIssue("stream_first_arguments_invalid", "first tool delta arguments must be empty"))
                         slot.update(id=call_id, name=name)
                     else:
                         if call_id and call_id != slot["id"]:
-                            reply.errors.append("tool call id changed")
+                            reply.errors.append(WireIssue("stream_tool_id_changed", "tool call id changed"))
                         if name and name != slot["name"]:
-                            reply.errors.append("tool call name changed")
+                            reply.errors.append(WireIssue("stream_tool_name_changed", "tool call name changed"))
                         if set(call) - {"index", "function"} or set(function) - {"arguments"}:
-                            reply.errors.append("tool continuation must contain only index and arguments")
+                            reply.errors.append(WireIssue("stream_tool_continuation_invalid", "tool continuation must contain only index and arguments"))
                     slot["arguments"] += arguments
         reply.calls = [slots[index] for index in sorted(slots)]
         if finish_count != 1:
-            reply.errors.append(f"expected one finish frame, observed {finish_count}")
+            reply.errors.append(WireIssue("stream_finish_count_invalid", f"expected one finish frame, observed {finish_count}", "incomplete" if finish_count == 0 else "protocol"))
         if not reply.done:
-            reply.errors.append("missing DONE marker")
+            reply.errors.append(WireIssue("stream_done_missing", "missing DONE marker", "incomplete"))
         if not choice_count:
-            reply.errors.append("empty SSE stream")
+            reply.errors.append(WireIssue("stream_empty", "empty SSE stream", "incomplete"))
         reply.incomplete = finish_count == 0 or not reply.done
     except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
-        reply.errors.append(f"malformed response: {type(exc).__name__}: {exc}")
+        reply.errors.append(WireIssue("response_malformed", f"malformed response: {type(exc).__name__}: {exc}"))
     return reply
 
 
 def assert_reply(reply: Reply, expect: dict[str, Any], previous: list[Reply]) -> list[dict[str, Any]]:
-    problems = [issue("response_incomplete" if error in INCOMPLETE_ERRORS else "response_invalid", error) for error in reply.errors]
+    problems = [issue("response_incomplete" if error.category == "incomplete" else "response_invalid", error.message,
+                      actual={"code": error.code, "category": error.category}, path=["response", "errors", index])
+                for index, error in enumerate(reply.errors)]
     def add(code: str, message: str, expected: Any = None, actual: Any = None, path=None) -> None:
         problems.append(issue(code, message, expected=expected, actual=actual, path=path))
     if reply.status != expect["status"]:
@@ -428,10 +423,10 @@ class CapabilityClient:
                             remaining = MAX_RESPONSE_BYTES - len(data)
                             data.extend(chunk[:remaining])
                             if len(chunk) > remaining:
-                                transport_error = "transport failure: response byte limit exceeded"
+                                transport_error = WireIssue("response_byte_limit", "response byte limit exceeded", "transport")
                                 break
         except (httpx.HTTPError, TimeoutError) as exc:
-            transport_error = f"transport failure: {type(exc).__name__}"
+            transport_error = WireIssue("transport_failed", type(exc).__name__, "transport")
         invalid_utf8 = []
         try:
             text = data.decode("utf-8", errors="strict")
@@ -445,34 +440,11 @@ class CapabilityClient:
                         "elapsed_seconds": time.monotonic() - start_clock, "first_byte_seconds": first_byte,
                         "received_bytes": len(data)}
         if invalid_utf8:
-            reply.errors.append("response encoding: invalid UTF-8 bytes")
+            reply.errors.append(WireIssue("response_utf8_invalid", "response encoding: invalid UTF-8 bytes"))
         if transport_error:
             reply.errors.append(transport_error)
             reply.incomplete = True
         return reply
-
-
-def materialize_step(step: dict[str, Any], case: dict[str, Any], service: ServiceAccess,
-                     mode: str, root: Path) -> dict[str, Any]:
-    request = read_request(step, root)
-    if "message_slice" in step:
-        request["messages"] = request.get("messages", [])[:step["message_slice"]]
-    request["model"] = service.served_model
-    request.pop("max_tokens", None)
-    request.pop("max_completion_tokens", None)
-    request[token_parameter()] = case["max_output_tokens"]
-    if "thinking" in step:
-        if "thinking" in request or "reasoning_effort" in request:
-            raise ConfigError("case_invalid", "canonical thinking cannot be combined with raw thinking fields")
-        enabled, effort = step["thinking"], step.get("effort")
-        if service.think_mode == "opensource":
-            request["reasoning_effort"] = (effort or "max") if enabled else "none"
-        else:
-            request["thinking"] = {"type": "enabled", "keep": "all", **({"effort": effort} if effort else {})} if enabled else {"type": "disabled"}
-    request["stream"] = mode == "stream"
-    if request["stream"]:
-        request["stream_options"] = {**request.get("stream_options", {}), "include_usage": True}
-    return request
 
 
 def _outcome(reply: Reply, expect: dict[str, Any], problems: list[dict[str, Any]]) -> tuple[str, str | None]:
@@ -489,29 +461,6 @@ def _outcome(reply: Reply, expect: dict[str, Any], problems: list[dict[str, Any]
     if uncertain and not any(problem["code"] not in {"response_incomplete", "output_truncated", "generation_filtered"} for problem in problems):
         return "inconclusive", None
     return ("failed" if problems else "passed"), None
-
-
-def prepare_steps(plan: dict[str, Any], service: ServiceAccess, root: Path) -> list[tuple]:
-    """Resolve requests and expectations once; execution consumes these snapshots."""
-    prepared = []
-    for case in plan["cases"]:
-        if case["missing_requirements"]:
-            continue
-        for repeat, group, index, mode, step in iter_case_steps(case, plan["repeat"]):
-            request = materialize_step(step, case, service, mode, root)
-            expect = copy.deepcopy(step["expect"])
-            if expect["status"] == 200:
-                tools = list(request.get("tools") or [])
-                for message in request["messages"]:
-                    tools.extend(message.get("tools") or [])
-                declared = [tool["function"]["name"] for tool in tools]
-                if set(expect.get("tool_names", [])) - set(declared):
-                    raise ConfigError("case_invalid", f"{case['id']}: oracle names an undeclared tool")
-                expect.setdefault("tool_names", declared)
-                if request.get("tool_choice") in ("required", "none"):
-                    expect.setdefault("tools", request["tool_choice"])
-            prepared.append((case, repeat, group, index, mode, step, request, expect))
-    return prepared
 
 
 def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
@@ -536,7 +485,6 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
     if expected_count and not service.credential():
         raise ConfigError("credential_missing", f"set {service.api_key_env}")
     if plan.get("kind") == "endpoint_plan":
-        from .execution_plan import verify_plan
         prepared = verify_plan(plan, service, root=root)
         if timeout != plan["execution"]["timeout_seconds"] or max_requests > plan["execution"]["max_requests"]:
             raise ConfigError("plan_override_invalid", "execution limits cannot expand or differ from the frozen plan")
@@ -555,17 +503,21 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
     results = [{"id": case["id"], "capability": case["capability"], "status": "contract_unknown" if any(value.endswith(":unknown") for value in case["missing_requirements"]) else "unsupported",
                 "role": case.get("role", "gate"), "stage": case.get("stage", "protocol"), "obligation": case.get("obligation", "required"),
                 "problems": [issue("requirement_missing", "case not applicable", actual=value) for value in case["missing_requirements"]], "knowledge": case["knowledge"],
-                "likely_components": case["likely_components"], "source": case["source"]}
+                "likely_components": case["likely_components"], "source": case["source"],
+                "locator": {"file": case.get("file", ""), "line": case.get("line", 1)}}
                for case in plan["cases"] if case["missing_requirements"]]
     client, actual_requests, stop_reason = CapabilityClient(service, timeout=timeout), 0, None
     histories: dict[tuple[str, int, int], list[Reply]] = {}
     sent_requests: dict[tuple[str, int, int], list[dict]] = {}
     outcomes: dict[tuple[str, int, int], list[str]] = {}
-    for case, repeat, group, index, mode, step, request, expect in prepared:
+    for unit in prepared:
+        case, repeat, group, index = unit.case, unit.repeat, unit.group, unit.index
+        mode, step, request, expect = unit.mode, unit.step, unit.request, unit.expect
         result = {"id": case["id"], "capability": case["capability"], "repeat": repeat,
                   "group": group, "mode": mode, "step": index, "problems": [], "likely_components": case["likely_components"],
                   "role": case.get("role", "gate"), "stage": case.get("stage", "protocol"), "obligation": case.get("obligation", "required"),
-                  "knowledge": case["knowledge"], "source": case["source"]}
+                  "knowledge": case["knowledge"], "source": case["source"],
+                  "locator": {"file": case.get("file", ""), "line": case.get("line", 1)}}
         evidence_name = f"{case['id']}-{repeat}-{group}-{mode}-{index}.json"
         if stop_reason or actual_requests >= max_requests:
             stop_reason = stop_reason or "request_budget_exceeded"
@@ -589,7 +541,7 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
             reply = client.call(request)
             problems = assert_reply(reply, expect, history)
             status, failure = _outcome(reply, expect, problems)
-            if status == "passed" and case.get("determinism") == "observation":
+            if status == "passed" and case.get("role") == "observation":
                 status = "observed"
             history.append(reply)
             requests.append(request)
@@ -610,7 +562,7 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
             result.update(status="execution_invalid", failure_class="runner_error",
                           problems=[issue("runner_error", f"runner error: {type(exc).__name__}: {exc}")])
         result["evidence"] = evidence_name
-        evidence = redact({"schema_version": 2, "kind": "endpoint_evidence", "request": request,
+        evidence = redact({"schema_version": 3, "kind": "endpoint_evidence", "request": request,
                            "response": asdict(reply) if reply is not None else None, "expect": expect,
                            "result": result, "request_sha256": canonical_hash(request), "request_sent": request_sent,
                            "template_request_sha256": template_hash, "binding_sha256": canonical_hash(step.get("continue_from"))}, credential)
@@ -620,8 +572,8 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
     statuses = {result["status"] for result in results}
     status = next((value for value in ("service_invalid", "execution_invalid", "failed") if value in statuses), None)
     status = status or ("incomplete" if statuses & {"inconclusive", "unsupported", "contract_unknown", "not_run"} else "observed" if "observed" in statuses else "passed")
-    report = redact({"schema_version": 2, "kind": "endpoint_report", "status": status, "model": plan["model"], "run_dir": str(directory),
-                     "plan_sha256": plan.get("plan_sha256"), "target": service.public_dict(),
+    report = redact({"schema_version": 3, "kind": "endpoint_report", "status": status, "model": plan["model"], "run_dir": str(directory),
+                     "plan_sha256": plan.get("plan_sha256"), "target": service.public_dict(), "repeat": plan["repeat"],
                      "gate_summary": gate_summary(plan["cases"], results, plan["repeat"]),
                      "scenario_sha256": {case["id"]: scenario_identity(case, plan) for case in plan["cases"]},
                      "stop_reason": stop_reason, "planned_requests": expected_count, "actual_requests": actual_requests,
@@ -634,6 +586,7 @@ def run_plan(plan: dict[str, Any], service: ServiceAccess, *, max_requests: int,
         lines.extend(f"  - {problem['code']}: {problem['message']}" for problem in result["problems"])
         if result.get("evidence"):
             lines.append(f"  - [evidence]({result['evidence']})")
+        lines.append(f"  - Case: {result['locator']['file']}:{result['locator']['line']}")
         lines.append("  - Components: " + ", ".join(result["likely_components"]))
         lines.append("  - Knowledge: " + ", ".join(result["knowledge"]))
     (directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

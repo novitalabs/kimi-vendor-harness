@@ -8,9 +8,11 @@ import pytest
 
 from novita_self_test import capability_runtime as runtime
 from novita_self_test.capability_runtime import (
-    CapabilityClient, Reply, assert_reply, materialize_step, parse_reply, run_plan, service_failure,
+    CapabilityClient, Reply, assert_reply, parse_reply, run_plan, service_failure,
 )
 from novita_self_test.config import ConfigError, ServiceAccess
+from novita_self_test.request_preparation import materialize_step
+from novita_self_test.wire_issue import WireIssue
 
 
 def completion(content="OK", *, calls=None, finish="stop", usage=None):
@@ -81,10 +83,10 @@ def test_malformed_stream_lifecycle_is_rejected(fault):
 
 def test_stream_summary_is_allowed_but_missing_done_is_inconclusive():
     reply = parse_reply(200, sse(stream_frames(), done=False), stream=True)
-    assert "missing DONE marker" in reply.errors
+    assert "stream_done_missing" in {error.code for error in reply.errors}
     assert reply.incomplete
     assert reply.calls[0]["name"] == "get_weather"
-    assert not any("after finish" in error for error in reply.errors)
+    assert not any(error.code == "stream_data_after_finish" for error in reply.errors)
 
 
 @pytest.mark.parametrize("body", [[], {"choices": []}, completion([]), completion(False), completion(calls={}), completion(calls=[{"function": []}]), completion(usage=[1]), completion(finish=7)])
@@ -105,7 +107,8 @@ def test_assertion_distinguishes_invalid_request_from_server_failure():
     (401, "", [], "service_invalid"), (403, "", [], "service_invalid"),
     (402, '{"error":{"code":"insufficient_quota"}}', [], "quota_exhausted"),
     (429, "rate limit", [], "rate_limited"), (503, "overloaded", [], "service_unavailable"),
-    (None, "", ["transport failure: ReadTimeout"], "execution_invalid"),
+    (None, "", [WireIssue("transport_failed", "ReadTimeout", "transport")], "execution_invalid"),
+    (200, "", [WireIssue("transport_failed", "wording may change", "transport")], "execution_invalid"),
     (200, "answer mentions authentication and invalid api key", [], None),
     (400, '{"error":{"message":"unsupported authentication field"}}', [], None),
 ])
@@ -131,7 +134,7 @@ def plan(*cases, repeat=1):
     return {"model": "kimi-k3", "repeat": repeat, "request_budget": count, "cases": [{**case, "missing_requirements": []} for case in cases]}
 
 
-@pytest.mark.parametrize("reply,status", [(Reply(401, '{"error":{"message":"invalid api key"}}'), "service_invalid"), (Reply(429), "execution_invalid"), (Reply(503), "execution_invalid"), (Reply(None, errors=["transport failure: ConnectError"]), "execution_invalid")])
+@pytest.mark.parametrize("reply,status", [(Reply(401, '{"error":{"message":"invalid api key"}}'), "service_invalid"), (Reply(429), "execution_invalid"), (Reply(503), "execution_invalid"), (Reply(None, errors=[WireIssue("transport_failed", "ConnectError", "transport")]), "execution_invalid")])
 def test_service_failure_stops_before_later_cases(service, monkeypatch, tmp_path, reply, status):
     calls = []
     def fake_call(self, request):
@@ -302,6 +305,15 @@ def test_incomplete_generation_does_not_hide_observed_marker_or_disabled_reasoni
     filtered = parse_reply(200, json.dumps(completion("", finish="content_filter")), stream=False)
     problems = assert_reply(filtered, {"status": 200, "public_turn": True}, [])
     assert runtime._outcome(filtered, {"status": 200}, problems)[0] == "inconclusive"
+
+
+def test_wire_issue_wording_does_not_change_classification():
+    for message in ("missing DONE marker", "SSE ended without final sentinel"):
+        reply = Reply(200, content="OK", finish_reason="stop", incomplete=True,
+                      errors=[WireIssue("stream_done_missing", message, "incomplete")])
+        problems = assert_reply(reply, {"status": 200}, [])
+        assert runtime._outcome(reply, {"status": 200}, problems)[0] == "inconclusive"
+        assert problems[0]["code"] == "response_incomplete"
 
 
 def test_canonical_thinking_materializes_dialect_but_raw_conflicts_are_preserved(tmp_path, service):

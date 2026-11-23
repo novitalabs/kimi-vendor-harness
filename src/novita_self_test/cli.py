@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Sequence
 
 from .capability_runtime import run_plan
-from .case_catalog import load_cases
-from .config import ConfigError, ServiceAccess, redact
+from .case_catalog import catalog_view, lint_cases, load_cases
+from .config import ConfigError, ServiceAccess, canonical_hash, redact
 from .contracts import error_result, exit_code, issue, json_text, validate_contract
 from .parser_conformance import DEFAULT_VECTORS, run_adapter, validate_vectors
 from .execution_plan import create_plan, load_plan, verify_plan
@@ -28,14 +28,20 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
     plan = commands.add_parser("plan", help="inspect cases and request budgets (no traffic)")
     plan.add_argument("--model", default="kimi-k3")
-    plan.add_argument("--select", action="append")
+    plan.add_argument("--select", action="append", help="union of ids, paths, globs or tag:/component:/role:/stage: selectors")
+    plan.add_argument("--filter", action="append", help="AND refinement of the selected union")
+    plan.add_argument("--exclude", action="append", help="subtract matching cases")
     plan.add_argument("--failed-from", type=Path, help="replan whole failed/inconclusive/not-run scenarios from a previous report; no automatic execution")
-    plan.add_argument("--repeat", type=int, default=1)
-    plan.add_argument("--format", choices=("json", "summary"), default="json")
+    plan.add_argument("--repeat", type=int, help="default 1; required explicitly with --failed-from")
+    plan.add_argument("--format", choices=("json", "summary", "catalog"), default="json")
     plan.add_argument("--out", type=Path)
     plan.add_argument("--service-access", type=Path, help="bind a public target identity to make the plan executable")
     plan.add_argument("--max-requests", type=int, default=32)
     plan.add_argument("--timeout", type=float, default=120, help="freeze wall-clock seconds per HTTP request")
+
+    lint = commands.add_parser("lint", help="validate case files/ids offline; no service or model required")
+    lint.add_argument("--file", action="append", help="repository-relative capabilities/**/cases.jsonl; default full catalog")
+    lint.add_argument("--id", action="append", help="validate exact case id within file/catalog scope")
 
     doctor = commands.add_parser("doctor", help="zero-traffic local preflight; does not prove endpoint health")
     doctor.add_argument("--model")
@@ -74,6 +80,7 @@ def parser() -> argparse.ArgumentParser:
     comparison = commands.add_parser("compare", help="compare two endpoint reports offline without sending requests")
     comparison.add_argument("--baseline", required=True, type=Path)
     comparison.add_argument("--candidate", required=True, type=Path)
+    comparison.add_argument("--scope", choices=("all", "candidate"), default="all", help="candidate compares only retested case ids; other baseline cases stay not_retested")
     return root
 
 
@@ -94,11 +101,16 @@ def _summary(plan: dict) -> str:
              "Target-bound executable plan." if plan["executable"] else "Not executable: bind a target and resolve unknown requirements.",
              f"Request ceiling: {plan['execution']['max_requests']}; opt-in cases: {len(plan['opt_in_cases'])}",
              "No endpoint traffic generated.", ""]
+    if plan["retest"]:
+        lines.append(f"Retest baseline repeat: {plan['retest']['baseline_repeat']}; repeat changed: {plan['retest']['repeat_changed']}")
+        lines.append(plan["retest"]["warning"])
     for case in plan["cases"]:
         applicability = "blocked: " + ", ".join(case["missing_requirements"]) if case["missing_requirements"] else "applicable"
         opt_in = "; requires --allow-opt-in" if "opt_in" in case["tags"] else ""
         lines.append(f"- {case['id']} | {case['planned_requests']} requests | {applicability}{opt_in}")
         lines.append(f"  {case['title']} [{case['role']}/{case['stage']}; {case['obligation']}; {case['determinism']}]")
+        lines.append(f"  {case['file']}:{case['line']} | components: {', '.join(case['likely_components'])}")
+        lines.append("  knowledge: " + ", ".join(case["knowledge"]))
     return "\n".join(lines) + "\n"
 
 
@@ -114,25 +126,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = run_renderer(args.vectors, getattr(args, "adapter", None), getattr(args, "timeout", 30))
             validate_contract(output, "renderer-report.schema.json")
         elif args.command == "compare":
-            output = compare(load_report(args.baseline), load_report(args.candidate))
+            output = compare(load_report(args.baseline), load_report(args.candidate), scope=args.scope)
             validate_contract(output, "comparison.schema.json")
+        elif args.command == "lint":
+            output = lint_cases(files=args.file, ids=args.id)
+            validate_contract(output, "lint.schema.json")
         elif args.command == "plan":
+            retest = None
             if args.failed_from:
-                if args.select:
-                    raise ConfigError("arguments_invalid", "--failed-from cannot be combined with --select")
+                if args.select or args.filter or args.exclude:
+                    raise ConfigError("arguments_invalid", "--failed-from cannot be combined with select/filter/exclude")
                 previous = load_report(args.failed_from)
                 if previous["model"] != args.model:
                     raise ConfigError("model_mismatch", "failed report model differs; do not silently migrate test specifications")
+                if args.repeat is None:
+                    raise ConfigError("retest_repeat_required", "review baseline repeat and supply --repeat explicitly; no plan generated",
+                                      expected={"baseline_repeat": previous["repeat"]}, path=["repeat"])
                 args.select = failed_ids(previous)
                 if not args.select:
                     raise ConfigError("retest_empty", "report has no failed/inconclusive/not-run scenarios; no plan generated")
                 known_ids = {case["id"] for case in load_cases()}
                 if not set(args.select) <= known_ids:
                     raise ConfigError("retest_case_unknown", "report references case ids absent from the current catalog; review before replanning")
+                retest = {"baseline_report_sha256": canonical_hash(previous), "baseline_repeat": previous["repeat"],
+                          "repeat_changed": args.repeat != previous["repeat"], "case_ids": args.select,
+                          "baseline_units": sum(row["id"] in args.select for row in previous["results"]),
+                          "warning": "New plan, not permission or retry. Review remaining budget. Different repeat/spec/coverage is not comparable; use compare --scope candidate only for explicit subset retests."}
             service = ServiceAccess.load(args.service_access) if args.service_access else None
-            plan = create_plan(model=args.model, selectors=args.select, repeat=args.repeat,
-                               service=service, max_requests=args.max_requests, timeout=args.timeout)
-            text = _summary(plan) if args.format == "summary" else json_text(plan)
+            plan = create_plan(model=args.model, selectors=args.select, filters=args.filter, excludes=args.exclude, repeat=args.repeat if args.repeat is not None else 1,
+                               service=service, max_requests=args.max_requests, timeout=args.timeout, retest=retest)
+            if args.format == "catalog":
+                output = catalog_view(plan)
+                validate_contract(output, "catalog.schema.json")
+                text = json_text(output)
+            else:
+                text = _summary(plan) if args.format == "summary" else json_text(plan)
             if args.out:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
                 args.out.write_text(text, encoding="utf-8")
@@ -188,7 +216,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         # Output-contract errors can occur after HTTP; never claim zero traffic.
         count = None if execution_started and exc.code == "output_contract_invalid" else 0
-        output = error_result(command, exc.code, str(exc), endpoint_requests=count)
+        output = error_result(command, exc.code, str(exc), endpoint_requests=count,
+                              path=exc.path, expected=exc.expected, actual=exc.actual)
     except (OSError, ValueError) as exc:
         output = error_result(command, "local_io_invalid", f"{type(exc).__name__}: {exc}",
                               endpoint_requests=None if execution_started else 0)

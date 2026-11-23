@@ -3,9 +3,9 @@
   "$id": "plan.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "kind", "status", "model", "profile_status", "profile_notes", "repeat", "enabled_features", "concurrency", "retries", "request_budget", "max_output_tokens_budget", "profile_sha256", "cases", "producer", "target", "execution", "units", "plan_sha256", "inputs", "executable", "opt_in_cases", "contract_authority"],
+  "required": ["schema_version", "kind", "status", "model", "profile_status", "profile_notes", "repeat", "enabled_features", "concurrency", "retries", "request_budget", "max_output_tokens_budget", "profile_sha256", "cases", "producer", "target", "execution", "units", "plan_sha256", "inputs", "executable", "opt_in_cases", "contract_authority", "retest"],
   "properties": {
-    "schema_version": {"const": 3},
+    "schema_version": {"const": 4},
     "kind": {"const": "endpoint_plan"},
     "status": {"const": "ready"},
     "model": {"type": "string"},
@@ -23,9 +23,9 @@
       "items": {
         "$ref": "capability-case.schema.json#/$defs/case",
         "unevaluatedProperties": false,
-        "required": ["file", "request_budget", "scope", "planned_requests", "required_features", "missing_requirements", "obligation"],
+        "required": ["file", "line", "request_budget", "scope", "planned_requests", "required_features", "missing_requirements", "obligation"],
         "properties": {
-          "file": {"type": "string"},
+          "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
           "request_budget": {"type": "integer", "minimum": 0},
           "planned_requests": {"type": "integer", "minimum": 0},
           "required_features": {"type": "array", "items": {"type": "string"}},
@@ -72,7 +72,16 @@
     "inputs": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/sha256"}},
     "executable": {"type": "boolean"},
     "opt_in_cases": {"type": "array", "items": {"type": "string"}},
-    "contract_authority": {"$ref": "capability-profile.schema.json#/properties/authority"}
+    "contract_authority": {"$ref": "capability-profile.schema.json#/properties/authority"},
+    "retest": {"anyOf": [{"type": "null"}, {
+      "type": "object", "additionalProperties": false,
+      "required": ["baseline_report_sha256", "baseline_repeat", "repeat_changed", "case_ids", "baseline_units", "warning"],
+      "properties": {
+        "baseline_report_sha256": {"$ref": "#/$defs/sha256"}, "baseline_repeat": {"type": "integer", "minimum": 1},
+        "repeat_changed": {"type": "boolean"}, "case_ids": {"type": "array", "items": {"type": "string"}},
+        "baseline_units": {"type": "integer", "minimum": 0}, "warning": {"type": "string"}
+      }
+    }]}
   },
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}

@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "kind": {
       "const": "endpoint_evidence"
@@ -87,7 +87,9 @@
             "errors": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "object", "additionalProperties": false, "required": ["code", "message", "category"],
+                "properties": {"code": {"type": "string"}, "message": {"type": "string"},
+                               "category": {"enum": ["protocol", "incomplete", "transport"]}}
               }
             }
           },

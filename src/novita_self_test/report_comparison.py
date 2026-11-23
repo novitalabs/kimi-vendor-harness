@@ -42,32 +42,59 @@ def _case_status(rows: list[dict]) -> str:
     return next((status for status in ("service_invalid", "execution_invalid", "failed", "contract_unknown", "unsupported", "not_run", "inconclusive", "observed") if status in statuses), "passed")
 
 
-def compare(baseline: dict, candidate: dict) -> dict:
+def unit_key(row: dict) -> tuple:
+    return tuple(row.get(key, default) for key, default in (("repeat", -1), ("group", -1), ("step", -1), ("mode", "")))
+
+
+def _transition(before: dict, after: dict) -> str:
+    if before["status"] == "failed" and after["status"] == "passed":
+        return "fixed"
+    if before["status"] == "passed" and after["status"] == "failed":
+        return "regressed"
+    codes = lambda row: sorted(problem["code"] for problem in row.get("problems", []))
+    return "unchanged" if before["status"] == after["status"] and codes(before) == codes(after) else "changed_evidence"
+
+
+def compare(baseline: dict, candidate: dict, *, scope: str = "all") -> dict:
+    if scope not in {"all", "candidate"}:
+        raise ConfigError("comparison_scope_invalid", "comparison scope must be all or candidate")
     left, right = {}, {}
     for target, report in ((left, baseline), (right, candidate)):
         for row in report["results"]:
             target.setdefault(row["id"], []).append(row)
     changes = []
-    for id in sorted(set(left) | set(right)):
+    ids = set(right) if scope == "candidate" else set(left) | set(right)
+    for id in sorted(ids):
         a, b = left.get(id, []), right.get(id, [])
-        before, after = _case_status(a) if a else None, _case_status(b) if b else None
-        units_a = sorted((row.get("repeat", -1), row.get("group", -1), row.get("step", -1), row.get("mode", "")) for row in a)
-        units_b = sorted((row.get("repeat", -1), row.get("group", -1), row.get("step", -1), row.get("mode", "")) for row in b)
-        comparable = bool(a and b) and units_a == units_b and baseline.get("scenario_sha256", {}).get(id) == candidate.get("scenario_sha256", {}).get(id) and baseline.get("scenario_sha256", {}).get(id) is not None
-        if not comparable:
-            transition = "not_comparable"
-        elif before == "failed" and after == "passed":
-            transition = "fixed"
-        elif before == "passed" and after == "failed":
-            transition = "regressed"
-        elif before == after:
-            transition = "unchanged"
-        else:
-            transition = "changed_evidence"
-        changes.append({"id": id, "before": before, "after": after, "transition": transition,
+        indexed_a, indexed_b = {unit_key(row): row for row in a}, {unit_key(row): row for row in b}
+        coordinates_valid = all(all(type(row.get(key)) is int and row[key] >= 0 for key in ("repeat", "group", "step"))
+                                and row.get("mode") in {"stream", "nonstream"} for row in [*a, *b])
+        comparable = (bool(a and b) and coordinates_valid and len(indexed_a) == len(a) and len(indexed_b) == len(b)
+                      and indexed_a.keys() == indexed_b.keys()
+                      and baseline.get("scenario_sha256", {}).get(id) is not None
+                      and baseline["scenario_sha256"][id] == candidate.get("scenario_sha256", {}).get(id))
+        units = []
+        if comparable:
+            for key in sorted(indexed_a):
+                before, after = indexed_a[key], indexed_b[key]
+                units.append({"repeat": key[0], "group": key[1], "step": key[2], "mode": key[3],
+                              "before": before["status"], "after": after["status"], "transition": _transition(before, after),
+                              "before_codes": sorted(p["code"] for p in before.get("problems", [])),
+                              "after_codes": sorted(p["code"] for p in after.get("problems", []))})
+        transitions = {unit["transition"] for unit in units}
+        transition = ("not_comparable" if not comparable else "regressed" if "regressed" in transitions
+                      else "fixed" if _case_status(a) == "failed" and _case_status(b) == "passed"
+                      else "changed_evidence" if transitions - {"unchanged"} else "unchanged")
+        changes.append({"id": id, "before": _case_status(a) if a else None, "after": _case_status(b) if b else None,
+                        "transition": transition, "units": units,
                         "candidate_evidence": [row["evidence"] for row in b if "evidence" in row]})
-    comparison_status = "failed" if any(row["transition"] == "regressed" for row in changes) else "incomplete" if any(row["transition"] == "not_comparable" for row in changes) else "passed"
-    return {"schema_version": 1, "kind": "report_comparison", "status": comparison_status, "endpoint_requests": 0,
+    invalid_statuses = {"service_invalid", "execution_invalid", "contract_unknown", "unsupported", "not_run", "inconclusive"}
+    incomplete = not changes or any(row["transition"] == "not_comparable"
+                                  or any(unit["before"] in invalid_statuses or unit["after"] in invalid_statuses for unit in row["units"])
+                                  for row in changes)
+    comparison_status = "failed" if any(row["transition"] == "regressed" for row in changes) else "incomplete" if incomplete else "passed"
+    return {"schema_version": 2, "kind": "report_comparison", "status": comparison_status, "endpoint_requests": 0,
             "baseline_run": baseline["run_dir"], "candidate_run": candidate["run_dir"], "changes": changes,
+            "scope": scope, "not_retested": sorted(set(left) - set(right)),
             "retest_case_ids": failed_ids(candidate),
-            "warning": "Status describes comparison, not candidate acceptance: failed=regression, incomplete=spec/scope mismatch. Unchanged failures remain failures. Different target revisions are expected; check runtime provenance. No tests were rerun."}
+            "warning": "Comparison status is not candidate acceptance. Inspect unit transitions; unchanged failures remain failures. Different target revisions need a new plan. No tests were rerun."}

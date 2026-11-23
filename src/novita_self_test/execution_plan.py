@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from .case_catalog import build_plan, load_cases, load_profile, select_cases
-from .capability_runtime import MAX_RESPONSE_BYTES, prepare_steps, token_parameter
+from .request_preparation import MAX_RESPONSE_BYTES, PreparedStep, prepare_steps, token_parameter
 from .config import ConfigError, ServiceAccess, canonical_hash, redact, safe_path, strict_json, workspace_root
 from .contracts import validate_contract
 
@@ -46,11 +46,10 @@ def execution_config(*, max_requests: int, timeout: float) -> dict:
             "network_env_sha256": canonical_hash({name: os.environ.get(name) for name in NETWORK_ENV})}
 
 
-def _unit_hashes(prepared: list[tuple]) -> list[dict]:
-    return [{"id": case["id"], "repeat": repeat, "group": group, "step": index, "mode": mode,
-             "request_sha256": canonical_hash(request), "expect_sha256": canonical_hash(expect),
-             "binding_sha256": canonical_hash(step.get("continue_from"))}
-            for case, repeat, group, index, mode, step, request, expect in prepared]
+def _unit_hashes(prepared: list[PreparedStep]) -> list[dict]:
+    return [{"id": unit.case["id"], "repeat": unit.repeat, "group": unit.group, "step": unit.index, "mode": unit.mode,
+             "request_sha256": canonical_hash(unit.request), "expect_sha256": canonical_hash(unit.expect),
+             "binding_sha256": canonical_hash(unit.step.get("continue_from"))} for unit in prepared]
 
 
 def _seal(plan: dict) -> dict:
@@ -60,18 +59,19 @@ def _seal(plan: dict) -> dict:
     return plan
 
 
-def create_plan(*, model: str, selectors: list[str] | None = None, repeat: int = 1,
+def create_plan(*, model: str, selectors: list[str] | None = None,
+                filters: list[str] | None = None, excludes: list[str] | None = None, repeat: int = 1,
                 service: ServiceAccess | None = None, max_requests: int = 32, timeout: float = 120,
-                root: Path | None = None) -> dict:
+                root: Path | None = None, retest: dict | None = None) -> dict:
     root = (root or workspace_root()).resolve()
     load_profile(model, root)
-    selected = select_cases(load_cases(root), selectors)
+    selected = select_cases(load_cases(root), selectors, filters=filters, excludes=excludes)
     return _freeze(selected, model=model, repeat=repeat, service=service,
-                   max_requests=max_requests, timeout=timeout, root=root)[0]
+                   max_requests=max_requests, timeout=timeout, root=root, retest=retest)[0]
 
 
 def _freeze(cases: list[dict], *, model: str, repeat: int, service: ServiceAccess | None,
-            max_requests: int, timeout: float, root: Path) -> tuple[dict, list]:
+            max_requests: int, timeout: float, root: Path, retest: dict | None = None) -> tuple[dict, list]:
     config = execution_config(max_requests=max_requests, timeout=timeout)
     # Hash before and after resolving fixtures so the plan never approves mixed bytes.
     before = _inputs(cases, model, root)
@@ -87,7 +87,7 @@ def _freeze(cases: list[dict], *, model: str, repeat: int, service: ServiceAcces
     prepared = prepare_steps(plan, service, root) if service is not None else []
     if before != _inputs(cases, model, root) or producer != producer_identity(root):
         raise ConfigError("plan_drift", "plan inputs changed during preparation; create a new plan")
-    plan.update(schema_version=3, kind="endpoint_plan", status="ready", producer=producer, inputs=before,
+    plan.update(schema_version=4, kind="endpoint_plan", status="ready", producer=producer, inputs=before, retest=retest,
                 target=service.public_dict() if service else None,
                 executable=service is not None and not any(value.endswith(":unknown") for case in plan["cases"] for value in case["missing_requirements"]),
                 execution=config, units=_unit_hashes(prepared),
@@ -106,7 +106,7 @@ def load_plan(path: Path) -> dict:
     return plan
 
 
-def verify_plan(plan: dict, service: ServiceAccess, *, root: Path | None = None) -> list:
+def verify_plan(plan: dict, service: ServiceAccess, *, root: Path | None = None) -> list[PreparedStep]:
     root = (root or workspace_root()).resolve()
     try:
         validate_contract(plan, "plan.schema.json")
@@ -130,7 +130,7 @@ def verify_plan(plan: dict, service: ServiceAccess, *, root: Path | None = None)
             raise ConfigError("plan_drift", "selected case ids changed")
         current, prepared = _freeze([available[id] for id in ids], model=plan["model"], repeat=plan["repeat"],
                                     service=service, root=root, max_requests=plan["execution"]["max_requests"],
-                                    timeout=plan["execution"]["timeout_seconds"])
+                                    timeout=plan["execution"]["timeout_seconds"], retest=plan["retest"])
         if current != plan:
             raise ConfigError("plan_drift", "frozen requests, assertions, applicability or execution configuration changed; create a new plan")
         return prepared

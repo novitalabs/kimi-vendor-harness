@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "endpoint_requests", "model", "request_budget", "max_output_tokens_budget", "cases", "selectors", "warning"],
+  "properties": {
+    "schema_version": {"const": 1}, "kind": {"const": "case_catalog"}, "status": {"const": "ready"}, "endpoint_requests": {"const": 0},
+    "model": {"type": "string"}, "request_budget": {"type": "integer", "minimum": 0}, "max_output_tokens_budget": {"type": "integer", "minimum": 0},
+    "warning": {"type": "string"}, "selectors": {"type": "array", "items": {"type": "string"}},
+    "cases": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "capability", "file", "line", "role", "stage", "determinism", "obligation", "tags", "modes", "planned_requests", "max_output_tokens", "required_features", "missing_requirements", "source", "knowledge", "likely_components"],
+      "properties": {
+        "id": {"type": "string"}, "title": {"type": "string"}, "capability": {"type": "string"}, "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
+        "role": {"enum": ["gate", "diagnostic", "observation", "platform"]}, "stage": {"enum": ["protocol", "tooling", "conversation", "robustness", "regression"]},
+        "determinism": {"type": "string"}, "obligation": {"type": "string"}, "source": {"type": "object"},
+        "planned_requests": {"type": "integer", "minimum": 0}, "max_output_tokens": {"type": "integer", "minimum": 1},
+        "tags": {"$ref": "#/$defs/strings"}, "modes": {"$ref": "#/$defs/strings"}, "required_features": {"$ref": "#/$defs/strings"},
+        "missing_requirements": {"$ref": "#/$defs/strings"}, "knowledge": {"$ref": "#/$defs/strings"}, "likely_components": {"$ref": "#/$defs/strings"}
+      }
+    }}
+  },
+  "$defs": {"strings": {"type": "array", "items": {"type": "string"}}}
+}

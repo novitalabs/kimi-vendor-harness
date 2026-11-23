@@ -35,9 +35,11 @@ SECRET_VALUE_RE = re.compile(
 
 
 class ConfigError(ValueError):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, path: list[str | int] | None = None,
+                 expected: Any = None, actual: Any = None) -> None:
         super().__init__(message)
-        self.code = code
+        self.code, self.path = code, path or []
+        self.expected, self.actual = expected, actual
 
 
 def workspace_root() -> Path:

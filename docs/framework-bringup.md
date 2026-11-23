@@ -117,6 +117,26 @@ point. Channels and call names/order/index still compare exactly. Literal text
 vectors cannot distinguish true special token ids from ordinary marker text;
 use token-aware component evidence before claiming identity correctness.
 
+Adapter stdin is JSONL, one independent parser run per line:
+
+```json
+{"id":"synthetic-demo","text":"<input>","chunks":["<in","put>"],"tools":["get_weather"],"finish":"stop"}
+```
+
+Reset parser state for each request, feed `chunks` in order, and finish using
+`finish` (`stop` or `length`). Return one line, in request order:
+
+```json
+{"reasoning":"","content":"<parsed public text>","tool_calls":[{"name":"get_weather","index":0,"arguments":"{\"city\":\"Beijing\"}"}]}
+```
+
+`arguments` is always a string, including JSON-value comparisons. Index/order
+and channels compare exactly. Exit 0 after EOF; keep logs on stderr. No expected
+output is sent to the adapter. The neutral
+[parser bridge](../examples/parser-adapter.py) accepts an explicitly approved
+`--function module:parse`; implement it against your real framework, not the
+vector's expected outputs. It is not a bundled Kimi parser or a sandbox.
+
 ## 3. Run phased endpoint checks
 
 All selections below are zero-traffic plans. Inspect roles, applicability,
@@ -133,14 +153,20 @@ kimi-harness plan --model kimi-k3 --select stage:regression --format summary
 Use the correct verified model profile, not K3 as a shortcut for K3.1 Pro.
 Selectors are unions: `--select role:gate --select stage:conversation` does not
 mean their intersection. Use exact ids to freeze a bounded scope; see the
-[taxonomy](capability-taxonomy.md) for metadata. Components are hints, not diagnoses.
+[taxonomy](capability-taxonomy.md) for metadata. Use `--filter` for AND refinement
+and `--exclude` to subtract; use `--format catalog` or summary for file/line and
+component/knowledge links. Run scoped `lint --file/--id` while authoring and full
+lint before planning. Components are hints, not diagnoses.
 
-Roles are independent of determinism and requirements:
+Roles describe test purpose separately from requirement obligations:
 
 - `gate`: externally observable format/contract invariant;
 - `diagnostic`: prompt/model-dependent behavior, not a deterministic root cause;
 - `observation`: explicit data collection without a capability pass claim;
 - `platform`: selected policy such as dynamic-tool role/name validation.
+
+Observation role and observation determinism must agree. Role controls the
+no-pass claim; metadata disagreement is an authoring error, not a model result.
 
 Required gate rows feed `gate_summary`; unknown gate obligations remain gaps.
 Known unsupported cases are not mandatory applicable gates. The summary covers
@@ -151,8 +177,9 @@ vendor acceptance is produced.
 
 Ordinary cases use canonical step-level thinking intent, materialized as
 `reasoning_effort` for `opensource` or `thinking` for `kimi`. Raw conflict/default
-probes are separate and are not rewritten. Confirm the selected deployment
-supports its declared dialect. Fixed output caps remain bounded; length-based
+probes are separate and are not rewritten. Canonical thinking=true requires
+explicit effort; the planner and materializer validate it rather than guessing
+max/default. Confirm the deployment supports its declared dialect. Fixed output caps remain bounded; length-based
 inconclusive results are not automatic permission to increase them/retry.
 Known protocol violations remain failed even when generation is incomplete.
 
@@ -194,26 +221,35 @@ stale target-bound plans or automatically retry invalid execution.
 
 ```bash
 kimi-harness plan --model kimi-k3 \
-  --failed-from "$BASELINE_REPORT" \
+  --failed-from "$BASELINE_REPORT" --repeat 1 \
   --service-access "$NEW_ACCESS" --max-requests 4 --timeout 60 \
   --out "$RETEST_PLAN"
 # review/authorize, then doctor --plan and run --plan as usual
-kimi-harness compare --baseline "$BASELINE_REPORT" --candidate "$CANDIDATE_REPORT"
+kimi-harness compare --baseline "$BASELINE_REPORT" --candidate "$CANDIDATE_REPORT" \
+  --scope candidate
 ```
 
 `--failed-from` selects full cases containing failed/inconclusive/not-run rows.
 Service/execution-invalid reports are rejected as a retest source; resolve
 that prerequisite explicitly instead. Unknown case ids and empty failed sets
-are errors. It is a zero-traffic selection operation, not a retry request.
+are errors. Explicit `--repeat` is required: the baseline repeat is shown if
+omitted, never silently inherited or reduced. The sealed plan records baseline
+report hash/repeat/unit count and whether repeat changed. Review all scope and
+budget changes; this is zero-traffic planning, not a retry request.
 
 Reports contain a scenario/assertion fingerprint separate from frozen target
 identity. It includes model/profile, cases/fixtures/oracles, thinking/token-field
 configuration and harness producer. Target URL/runtime/source identity may
 change through a new plan. Changed scenario specs, producer/profile, mode/step/
-repeat coverage or missing cases are `not_comparable`, not `fixed`. Comparison
-status is failed for a regression, incomplete for scope/spec mismatch, otherwise
-passed; unchanged failures remain failures. This is comparison completion,
-**not** candidate acceptance. Evidence links and before/after statuses must be
+repeat coverage are `not_comparable`, not `fixed`. Compare preserves each unit's
+transition before case aggregation: a mode/step regression cannot be hidden by
+another mode's fix. A partially fixed case remains changed evidence, not fixed.
+Default `--scope all` marks missing cases not comparable. Explicit
+`--scope candidate` compares only retested case ids and lists all untouched
+baseline cases in `not_retested`; it never accepts missing units within a case.
+Comparison status is failed for a regression, incomplete for invalid/insufficient
+execution or scope/spec mismatch, otherwise passed; unchanged failures remain
+failures. This is comparison completion, **not** candidate acceptance. Evidence links and before/after statuses must be
 read. Use trusted reports; schemas do not authenticate who generated them.
 
 ## Evidence and known gaps

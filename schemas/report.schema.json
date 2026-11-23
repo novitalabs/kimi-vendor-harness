@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "kind": {
       "const": "endpoint_report"
@@ -22,6 +22,7 @@
     "model": {
       "type": "string"
     },
+    "repeat": {"type": "integer", "minimum": 1},
     "run_dir": {
       "type": "string"
     },
@@ -131,6 +132,7 @@
     "kind",
     "status",
     "model",
+    "repeat",
     "run_dir",
     "plan_sha256",
     "stop_reason",

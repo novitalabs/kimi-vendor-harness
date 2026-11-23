@@ -21,6 +21,9 @@ def test_all_output_schema_definitions_are_valid():
 
 @pytest.mark.parametrize("args,schema,status", [
     (["plan"], "plan.schema.json", 0),
+    (["plan", "--format", "catalog"], "catalog.schema.json", 0),
+    (["lint"], "lint.schema.json", 0),
+    (["lint", "--file", "capabilities/missing/cases.jsonl"], "lint.schema.json", 1),
     (["plan", "--repeat", "-1"], "error.schema.json", 2),
     (["plan", "--max-requests", "-1"], "error.schema.json", 2),
     (["plan", "--timeout", "nan"], "error.schema.json", 2),
